@@ -1,3 +1,689 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>feature-ancestor-grid-1.0.1</title>
+    <!--  (c) 2017 CA Technologies.  All Rights Reserved. -->
+    <!--  Build Date: Sun Sep 22 2019 13:15:54 GMT-0700 (Pacific Daylight Time) -->
+
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "Sun Sep 22 2019 13:15:54 GMT-0700 (Pacific Daylight Time)";
+        var CHECKSUM = 38756276337;
+    </script>
+
+    <script type="text/javascript" src="/apps/2.1/sdk.js"></script>
+    <!-- our highcharts (needed so that we can add patterns)
+    <script type="text/javascript" src="/apps/2.1/lib/analytics/analytics-all.js"></script>
+    -->
+
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+             
+/**
+ * A link that pops up a version dialog box
+ */
+
+Ext.define('Rally.technicalservices.InfoLink',{
+    extend: 'Rally.ui.dialog.Dialog',
+    alias: 'widget.tsinfolink',
+    
+    /**
+     * @cfg {String} informationHtml
+     * Additional text to be displayed on the popup dialog (for exmaple,
+     * to add a description of the app's use or functionality)
+     */
+    informationHtml: null,
+    
+    /**
+     * 
+     * cfg {String} title
+     * The title for the dialog box
+     */
+    title: "Build Information",
+    
+    defaults: { padding: 5, margin: 5 },
+
+    closable: true,
+     
+    draggable: true,
+
+    autoShow: true,
+   
+    width: 350,
+    
+    informationalConfig: null,
+    
+    items: [{xtype:'container', itemId:'information' }],
+    
+    initComponent: function() {
+        var id = Ext.id(this);
+        this.title =  "<span class='icon-help'> </span>" + this.title;
+        this.callParent(arguments);
+    },
+    
+    _generateChecksum: function(string){
+        var chk = 0x12345678,
+            i;
+        string = string.replace(/var CHECKSUM = .*;/,"");
+        string = string.replace(/var BUILDER = .*;/,"");
+        string = string.replace(/\s/g,"");  //Remove all whitespace from the string.
+       
+        for (i = 0; i < string.length; i++) {
+            chk += (string.charCodeAt(i) * i);
+        }
+   
+        return chk;
+    },
+    
+    _checkChecksum: function(container) {
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        
+        Ext.Ajax.request({
+            url: document.URL,
+            params: {
+                id: 1
+            },
+            success: function (response) {
+                text = response.responseText;
+                if ( CHECKSUM ) {
+                    var stored_checksum = me._generateChecksum(text);
+                    if ( CHECKSUM !== stored_checksum ) {
+                        deferred.resolve(false);
+                        return;
+                    }
+                }
+                deferred.resolve(true);
+            }
+        });
+        
+        return deferred.promise;
+    },
+    
+    _addToContainer: function(container){
+        var config = Ext.apply({
+            xtype:'container',
+            height: 200,
+            overflowY: true
+        }, this.informationalConfig);
+        
+        container.add(config);
+    },
+    
+    afterRender: function() {
+        var app = Rally.getApp();
+        
+        if ( !Ext.isEmpty( this.informationalConfig ) ) {
+            var container = this.down('#information');
+            this._addToContainer(container);
+            
+        }
+        
+        if (! app.isExternal() ) {
+            this._checkChecksum(app).then({
+                scope: this,
+                success: function(result){
+                    if ( !result ) {
+                        this.addDocked({
+                            xtype:'container',
+                            cls: 'build-info',
+                            dock: 'bottom',
+                            padding: 2,
+                            html:'<span class="icon-warning"> </span>Checksums do not match'
+                        });
+                    }
+                },
+                failure: function(msg){
+                    console.log("oops:",msg);
+                }
+            });
+        } else {
+            this.addDocked({
+                xtype:'container',
+                cls: 'build-info',
+                padding: 2,
+                dock: 'bottom',
+                html:'... Running externally'
+            });
+        }
+        this.callParent(arguments);
+    },
+    
+    beforeRender: function() {
+        var me = this;
+        this.callParent(arguments);
+
+        if (this.informationHtml) {
+            this.addDocked({
+                xtype: 'component',
+                componentCls: 'intro-panel',
+                padding: 2,
+                html: this.informationHtml,
+                doc: 'top'
+            });
+        }
+        
+        this.addDocked({
+            xtype:'container',
+            cls: 'build-info',
+            padding: 2,
+            dock:'bottom',
+            html:"This app was created by the CA AC Technical Services Team."
+        });
+        
+        if ( APP_BUILD_DATE ) {
+            this.addDocked({
+                xtype:'container',
+                cls: 'build-info',
+                padding: 2,
+                dock: 'bottom',
+                html: Ext.String.format("Build date/time: {0} ({1})",
+                    APP_BUILD_DATE,
+                    BUILDER)
+            });
+        }
+    }
+});
+
+/*
+ */
+Ext.define('Rally.technicalservices.Logger',{
+    constructor: function(config){
+        Ext.apply(this,config);
+    },
+    log: function(args){
+        var timestamp = "[ " + Ext.util.Format.date(new Date(), "Y-m-d H:i:s.u") + " ]";
+        //var output_args = arguments;
+        //output_args.unshift( [ "[ " + timestamp + " ]" ] );
+        //output_args = Ext.Array.push(output_args,arguments);
+        
+        var output_args = [];
+        output_args = Ext.Array.push(output_args,[timestamp]);
+        output_args = Ext.Array.push(output_args, Ext.Array.slice(arguments,0));
+
+        window.console && console.log.apply(console,output_args);
+    }
+
+});
+
+Ext.define('RallyTechServices.inlinefilter.AncestorFilterRow', {
+    alias: 'widget.rallyancestorfilterrow',
+    extend: 'Rally.ui.inlinefilter.AdvancedFilterRow',
+
+    layout: 'hbox',
+    bubbleEvents: ['filterchange'],
+    cls: 'advanced-filter-row',
+    flex: 2,
+
+    config: {
+        context: undefined,
+        model: undefined,
+        autoExpand: false,
+        name: undefined,
+        operator: undefined,
+        rawValue: undefined,
+        addButtonEnabled: false,
+        removeButtonEnabled: false,
+        ancestorFieldConfig: {},
+        propertyFieldConfig: {},
+        operatorFieldConfig: {},
+        focusPropertyField: false
+    },
+
+    isValid: function() {
+        return this._hasPropertySelected() && this._hasOperatorSelected() && this._valueFieldIsValid();
+    },
+    _getFeatureName: function(){
+        if (!this.featureName){
+            var records = this.ancestorField && this.ancestorField.getStore() && this.ancestorField.getStore().getRange();
+            Ext.Array.each(records, function(r){
+                if (r.get('Ordinal') === 0){
+                    var typePath = r.get('TypePath');
+                    this.featureName = typePath.replace('PortfolioItem/','');
+                }
+            }, this);
+        }
+        return this.featureName;
+    },
+    getFilter: function() {
+        if (this.isValid()) {
+            var ancestorRecord = this.ancestorField.getRecord(),
+                property = this.propertyField.lastValue,
+                operator = this.operatorField.lastValue,
+                valueField = this.valueField;
+
+            var lastValue = Ext.isEmpty(valueField.lastValue) ? null : valueField.lastValue;
+
+            var isRefUri = Rally.util.Ref.isRefUri(lastValue);
+            var isRefOid = _.isNumber(Rally.util.Ref.getOidFromRef(lastValue));
+            if (isRefUri && isRefOid && valueField.valueField === '_ref' && valueField.noEntryValue !== lastValue) {
+                var record = valueField.getRecord();
+                if (record) {
+                    var uuidRef = record.get('_uuidRef');
+                    if (uuidRef) {
+                        lastValue = uuidRef;
+                    }
+                }
+            }
+
+            if (ancestorRecord && ancestorRecord.get('TypePath')){
+                var ordinal = ancestorRecord.get('Ordinal');
+                var propertyPrefix = [this._getFeatureName()];
+
+                if (ordinal === 0){
+                    propertyPrefix.push(property);
+                } else {
+                    for (var i=0; i<ordinal; i++){
+                        propertyPrefix.push('Parent');
+                    }
+                    propertyPrefix.push(property);
+                }
+                property = propertyPrefix.join('.');
+            }
+
+            var filter = Rally.data.wsapi.Filter.fromExtFilter({
+                property: property,
+                operator: operator,
+                value: lastValue
+            });
+
+            if (valueField.allowNoEntry && valueField.noEntryValue === lastValue) {
+                filter.value = null;
+            }
+
+            Ext.apply(filter, {
+                name: property,
+                rawValue: lastValue,
+                filterIndex: this.filterIndex
+            });
+
+            return filter;
+        }
+    },
+
+    _fixPropertyFieldInIE: function() {
+        if (Ext.isIE10m && this.propertyField.inputEl) {
+            this.propertyField.setValue(this.propertyField.getValue());
+        }
+    },
+    _onTypeAncestorStoreLoad: function(store, records){
+
+        var ancestor = this.name && this.name.split(".");
+        var idx = undefined,
+            thisVal = null;
+
+        if (ancestor && ancestor.length > 1){
+            idx = ancestor.length - 2;
+        }
+
+        Ext.Array.each(records, function(r){
+           if (r.get('Ordinal') === 0){
+               var typePath = r.get('TypePath');
+               this.featureName = typePath.replace('PortfolioItem/','');
+           }
+
+            if (idx === r.get('Ordinal')){
+                thisVal = r.get('TypePath');
+                return false;
+            }
+
+       }, this);
+
+       if (thisVal){
+           this.name = ancestor.slice(-1)[0];
+           this.ancestorField.setValue(thisVal);
+
+           this.originalName = this.name;
+           this.originalOperator = this.operator;
+           this.originalValue = this.rawValue;
+
+           this._onAncestorSelect(this.ancestorField);
+       }
+
+    },
+    _createAncestorField: function(){
+
+        this.ancestorField = Ext.widget(Ext.merge({
+            xtype: 'rallycombobox',
+            itemId: 'ancestorField',
+            autoExpand: this.autoExpand,
+            storeConfig: {
+                model: 'TypeDefinition',
+                fetch: ['TypePath','DisplayName','Ordinal','Name'],
+                filters: [{
+                    property: 'TypePath',
+                    operator: 'contains',
+                    value: 'PortfolioItem/'
+                }],
+                autoLoad: true,
+                listeners: {
+                    load: this._onTypeAncestorStoreLoad,
+                    scope: this
+                },
+                remoteFilter: true
+            },
+            allowNoEntry: true,
+            cls: 'indexed-field property-field',
+            width: 100,
+            labelAlign: 'top',
+            fieldLabel: 'OBJECT',
+            valueField: 'TypePath',
+            displayField: 'Name',
+            labelSeparator: '',
+            noEntryText: 'User Story',
+            listeners: {
+                select: this._onAncestorSelect,
+                scope: this
+            }
+        }, this.ancestorFieldConfig));
+    },
+
+    _createIndexLabel: function() {
+        this.indexLabel = Ext.widget({
+            xtype: 'label',
+            itemId: 'indexLabel',
+            cls: 'index-label',
+            hidden: true,
+            listeners: {
+                el: {
+                    click: function () {
+                        this.propertyField.expand();
+                    },
+                    scope: this
+                },
+                afterrender: {
+                    fn: function() {
+                        this.indexLabel.el.show();
+                    },
+                    scope: this,
+                    single: true
+                }
+            },
+            text: this._getFilterIndexText(this.filterIndex)
+        });
+    },
+
+    _getItems: function() {
+        this._createAddRowButton();
+        this._createRemoveRowButton();
+        this._createIndexLabel();
+        this._createAncestorField();
+        this._createPropertyField();
+        this._createOperatorField();
+        this._createValueField();
+
+        return [
+            this.addRowButton,
+            this.removeRowButton,
+            this.indexLabel,
+            this.ancestorField,
+            this.propertyField,
+            this.operatorField,
+            this.valueField
+        ];
+    },
+
+    _hasAncestorSelected: function() {
+        return !!this.ancestorField.getValue();
+    },
+
+    _replacePropertyField: function() {
+        var deferred = new Deft.Deferred();
+
+        this.name = this.originalName || undefined;
+        this.propertyField.destroy();
+        this._createPropertyField();
+        this.propertyField.store.on('load', function() {
+            deferred.resolve();
+        });
+        this.add(this.propertyField);
+        return deferred.promise;
+    },
+
+    _replaceOperatorField: function() {
+        var deferred = new Deft.Deferred();
+        delete this.operator;
+        this.operatorField.destroy();
+        this._createOperatorField();
+        this.operatorField.store.on('load', function() {
+            if (this.originalOperator){ //set this so that filters update
+                this.operatorField.setValue(this.originalOperator);
+                this._applyFilters();
+                delete this.originalOperator;
+            }
+            deferred.resolve();
+        }, this);
+
+        this.add(this.operatorField);
+        return deferred.promise;
+    },
+
+    _replaceValueField: function() {
+        delete this.rawValue;
+        this.rawValue = this.originalValue || undefined;
+        delete this.originalValue;
+
+        this.valueField.destroy();
+        this._createValueField();
+        this.add(this.valueField);
+        return Deft.Promise.when();
+    },
+    _onAncestorSelect: function() {
+
+        var type = this.ancestorField.getValue() || 'HierarchicalRequirement';
+        Rally.data.ModelFactory.getModel({
+            type: type,
+            success: function(model) {
+                this.model = model;
+
+                if (this.name){
+                    var names = this.name.split('.');
+                    this.name = names.slice(-1)[0];
+                }
+
+                Deft.Promise.all([
+                    this._replacePropertyField(),
+                    this._replaceOperatorField(),
+                    this._replaceValueField()
+                ]).then({
+                    success: function() {
+                        //We only want to do this once
+                        delete this.originalName;
+                        delete this.originalOperator;
+                        delete this.originalValue;
+
+                        this._applyFilters();
+                        this.propertyField.focus(false, 200);
+                    },
+                    scope: this
+                });
+            },
+            scope: this
+        });
+    }
+});
+Ext.define('CArABU.technicalservices.AncestorTemplateColumn', {
+    extend: 'Ext.grid.column.Template',
+    alias: ['widget.ancestortemplatecolumn'],
+
+    align: 'right',
+
+    initComponent: function(){
+        var me = this;
+
+        me.tpl = new Ext.XTemplate('<tpl><div style="text-align:right;">{[this.getAncestorString(values)]}</div></tpl>',{
+            ancestorName: me.ancestorName,
+
+            getAncestorString: function(values){
+                if (values.FormattedID){
+                    return Ext.String.format("<a href=\"{0}\" target=\"blank\">{1}</a>: {2}",Rally.util.Navigation.getDetailUrl(values), values.FormattedID, values.Name);
+                }
+                return '';
+            }
+
+        });
+        me.hasCustomRenderer = true;
+        me.callParent(arguments);
+    },
+    getValue: function(){
+        return values[this.dataIndex] || 0;
+    },
+    defaultRenderer: function(value, meta, record) {
+        var data = Ext.apply({}, record.get(this.ancestorName)); //, record.getAssociatedData());
+        return this.tpl.apply(data);
+    }
+});
+Ext.define('CArABU.technicalservices.FileUtilities',{
+    singleton: true,
+    saveCSVToFile:function(csv,file_name,type_object){
+        if (type_object === undefined){
+            type_object = {type:'text/csv;charset=utf-8'};
+        }
+        this.saveAs(csv,file_name, type_object);
+    },
+    saveAs: function(textToWrite, fileName)
+    {
+        if (Ext.isIE9m){
+            Rally.ui.notify.Notifier.showWarning({message: "Export is not supported for IE9 and below."});
+            return;
+        }
+
+        var textFileAsBlob = null;
+        try {
+            textFileAsBlob = new Blob([textToWrite], {type:'text/plain'});
+        }
+        catch(e){
+            window.BlobBuilder = window.BlobBuilder ||
+                window.WebKitBlobBuilder ||
+                window.MozBlobBuilder ||
+                window.MSBlobBuilder;
+            if (window.BlobBuilder && e.name === 'TypeError'){
+                bb = new BlobBuilder();
+                bb.append([textToWrite]);
+                textFileAsBlob = bb.getBlob("text/plain");
+            }
+
+        }
+
+        if (!textFileAsBlob){
+            Rally.ui.notify.Notifier.showWarning({message: "Export is not supported for this browser."});
+            return;
+        }
+
+        var fileNameToSaveAs = fileName;
+
+        if (Ext.isIE10p){
+            window.navigator.msSaveOrOpenBlob(textFileAsBlob,fileNameToSaveAs); // Now the user will have the option of clicking the Save button and the Open button.
+            return;
+        }
+
+        var url = this.createObjectURL(textFileAsBlob);
+
+        if (url){
+            var downloadLink = document.createElement("a");
+            if ("download" in downloadLink){
+                downloadLink.download = fileNameToSaveAs;
+            } else {
+                //Open the file in a new tab
+                downloadLink.target = "_blank";
+            }
+
+            downloadLink.innerHTML = "Download File";
+            downloadLink.href = url;
+            if (!Ext.isChrome){
+                // Firefox requires the link to be added to the DOM
+                // before it can be clicked.
+                downloadLink.onclick = this.destroyClickedElement;
+                downloadLink.style.display = "none";
+                document.body.appendChild(downloadLink);
+            }
+            downloadLink.click();
+        } else {
+            Rally.ui.notify.Notifier.showError({message: "Export is not supported "});
+        }
+    },
+    createObjectURL: function ( file ) {
+        if ( window.webkitURL ) {
+            return window.webkitURL.createObjectURL( file );
+        } else if ( window.URL && window.URL.createObjectURL ) {
+            return window.URL.createObjectURL( file );
+        } else {
+            return null;
+        }
+    },
+    destroyClickedElement: function(event)
+    {
+        document.body.removeChild(event.target);
+    }
+});
+
+
+Ext.override(Rally.ui.grid.TreeGrid, {
+    _mergeColumnConfigs: function(newColumns, oldColumns) {
+
+        var mergedColumns= _.map(newColumns, function(newColumn) {
+            var oldColumn = _.find(oldColumns, {dataIndex: this._getColumnName(newColumn)});
+            if (oldColumn) {
+                return this._getColumnConfigFromColumn(oldColumn);
+            }
+
+            return newColumn;
+        }, this);
+        mergedColumns = mergedColumns.concat(this.config.derivedColumns);
+        return mergedColumns;
+    },
+    _getColumnConfigsBasedOnCurrentOrder: function(columnConfigs) {
+        return _(this.headerCt.items.getRange()).map(function(column) {
+            //override:  Added additional search for column.text
+            return _.contains(columnConfigs, column.dataIndex) ? column.dataIndex : _.find(columnConfigs, {dataIndex: column.dataIndex, text: column.text});
+        }).compact().value();
+    },
+    _restoreColumnOrder: function(columnConfigs) {
+
+        var currentColumns = this._getColumnConfigsBasedOnCurrentOrder(columnConfigs);
+        var addedColumns = _.filter(columnConfigs, function(config) {
+            return !_.find(currentColumns, {dataIndex: config.dataIndex}) || Ext.isString(config);
+        });
+
+        return currentColumns.concat(addedColumns);
+    },
+    _applyStatefulColumns: function(columns) {
+        if (this.alwaysShowDefaultColumns) {
+            _.each(this.columnCfgs, function(columnCfg) {
+                if (!_.any(columns, {dataIndex: this._getColumnName(columnCfg)})) {
+                    columns.push(columnCfg);
+                }
+            }, this);
+        }
+        if (this.config && this.config.derivedColumns){
+            this.columnCfgs = columns.concat(this.config.derivedColumns);
+        } else {
+            this.columnCfgs = columns;
+        }
+    }
+});
+
+Ext.override(Rally.ui.inlinefilter.AdvancedFilterRows, {
+    _getRowConfig: function() {
+        return Ext.merge({
+            xtype: 'rallyancestorfilterrow',
+            autoExpand: this.autoExpand,
+            model: this.model,
+            context: this.context,
+            focusPropertyField: false,
+            operatorFieldConfig: this.operatorFieldConfig,
+            propertyFieldConfig: this.propertyFieldConfig,
+            listeners: {
+                addrow: function() {
+                    this._addRow(true);
+                },
+                removerow: this._removeRow,
+                scope: this
+            }
+        }, this.rowConfig);
+    }
+});
+
 Ext.define("feature-ancestor-grid", {
     extend: 'Rally.app.App',
     componentCls: 'app',
@@ -638,3 +1324,35 @@ Ext.define("feature-ancestor-grid", {
         this._buildGridboardStore();
     }
 });
+
+
+               Rally.launchApp('feature-ancestor-grid', {
+                   name: 'feature-ancestor-grid'
+               });
+        });
+    </script>
+
+    <style type="text/css">
+
+.app {
+}
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    text-align: center;
+    color: white;
+    background: #C0C0C0;
+    border-style: solid;
+    border-width: 1px;
+    margin-top: 25px;
+    margin-right: 5px;
+    cursor: pointer;
+}
+    </style>
+
+</head>
+<body></body>
+</html>
