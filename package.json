@@ -1,5 +1,5 @@
 {
-  "name": "feature-ancestor-grid",
+  "name": "user-story-ancestor-grid",
   "version": "1.0.2",
   "scripts": {
     "debug": "grunt debug",

@@ -1,11 +1,11 @@
-Ext.define("feature-ancestor-grid", {
+Ext.define("user-story-ancestor-grid", {
     extend: 'Rally.app.App',
     componentCls: 'app',
     logger: new Rally.technicalservices.Logger(),
     defaults: { margin: 10 },
 
     integrationHeaders: {
-        name: "feature-ancestor-grid"
+        name: "user-story-ancestor-grid"
     },
 
     config: {
@@ -57,7 +57,7 @@ Ext.define("feature-ancestor-grid", {
             settingsConfig: {},
             whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA'],
             filtersHidden: false,
-            visibleTab: 'portfolioitem/feature',
+            visibleTab: 'HierarchicalRequirement',
             listeners: {
                 scope: this,
                 ready(plugin) {
@@ -82,52 +82,50 @@ Ext.define("feature-ancestor-grid", {
             }
         });
         this.addPlugin(this.ancestorFilterPlugin);
-
-        // this.fetchPortfolioItemTypes().then({
-        //     success: this.initializeApp,
-        //     failure: this.showErrorNotification,
-        //     scope: this
-        // });
-
     },
     showErrorNotification: function (msg) {
         Rally.ui.notify.Notifier.showError({
             message: msg
         });
     },
-    initializeApp: function () {
+    initializeApp: function (portfolioTypes) {
         this.portfolioItemTypeDefs = _.map(this.portfolioItemTypes, function (p) { return p.getData(); });
-        this.ancestorNames = _.map(this.getPortfolioItemTypePaths(), function (pi) {
-            return pi.replace(/portfolioitem\//ig, '');
-        });
         this._buildGridboardStore();
     },
     getFeatureName: function () {
-        return this.getFeatureTypePath().replace(/portfolioitem\//ig, '');
+        return this.getFeatureTypePath().replace('PortfolioItem/', '');
     },
     getFeatureTypePath: function () {
         return this.portfolioItemTypeDefs[0].TypePath;
-    },
-    getFeatureParentName: function () {
-        return this.getFeatureParentTypePath().replace(/portfolioitem\//ig, '');
-    },
-    getFeatureParentTypePath: function () {
-        return (this.portfolioItemTypeDefs[1] && this.portfolioItemTypeDefs[1].TypePath) || '';
+        //return 'PortfolioItem/Feature';
     },
     getPortfolioItemTypePaths: function () {
         return _.pluck(this.portfolioItemTypeDefs, 'TypePath');
     },
-    getQueryFilter: function () {
-        var query = this.getSetting('query');
-        if (query && query.length > 0) {
-            this.logger.log('getQueryFilter', Rally.data.wsapi.Filter.fromQueryString(query));
-            return Rally.data.wsapi.Filter.fromQueryString(query);
-        }
-        return [];
+    fetchPortfolioItemTypes: function () {
+        return this.fetchWsapiRecords({
+            model: 'TypeDefinition',
+            fetch: ['TypePath', 'Ordinal', 'Name'],
+            context: { workspace: this.getContext().getWorkspace()._ref },
+            filters: [{
+                property: 'Parent.Name',
+                operator: '=',
+                value: 'Portfolio Item'
+            },
+            {
+                property: 'Creatable',
+                operator: '=',
+                value: 'true'
+            }],
+            sorters: [{
+                property: 'Ordinal',
+                direction: 'ASC'
+            }]
+        });
     },
     getFilters: async function () {
         let filters = this.getQueryFilter();
-        let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getFeatureTypePath(), true).catch((e) => {
+        let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getModelName(), true).catch((e) => {
             this.showErrorNotification(e.message || e);
             this.setLoading(false);
             return;
@@ -138,6 +136,14 @@ Ext.define("feature-ancestor-grid", {
         }
 
         return filters;
+    },
+    getQueryFilter: function () {
+        var query = this.getSetting('query');
+        if (query && query.length > 0) {
+            this.logger.log('getQueryFilter', Rally.data.wsapi.Filter.fromQueryString(query));
+            return Rally.data.wsapi.Filter.fromQueryString(query);
+        }
+        return [];
     },
     _buildGridboardStore: async function () {
         this.logger.log('_buildGridboardStore');
@@ -151,7 +157,7 @@ Ext.define("feature-ancestor-grid", {
         Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
             models: this.getModelNames(),
             enableHierarchy: true,
-            fetch: ['Parent', 'ObjectID'],
+            fetch: [this.getFeatureName(), 'ObjectID'],
             context: dataContext,
             enablePostGet: true,
             remoteSort: true,
@@ -165,7 +171,10 @@ Ext.define("feature-ancestor-grid", {
         });
     },
     getModelNames: function () {
-        return [this.getFeatureTypePath()];
+        return ['HierarchicalRequirement'];
+    },
+    getModelName: function () {
+        return 'HierarchicalRequirement';
     },
     getFeatureAncestorHash: function () {
         if (!this.featureAncestorHash) {
@@ -174,23 +183,20 @@ Ext.define("feature-ancestor-grid", {
         return this.featureAncestorHash;
     },
     setAncestors: function (records) {
-        var featureHash = this.getFeatureAncestorHash();
+        var featureHash = this.getFeatureAncestorHash(),
+            featureName = this.getFeatureName();
 
         for (var j = 0; j < records.length; j++) {
             var record = records[j],
-                featureParent = record.get('Parent');
-            if (featureParent) {
-                var objID = featureParent.ObjectID;
-                var featureParentObj = featureHash[objID];
-                for (var i = 1; i < this.ancestorNames.length; i++) {
-                    var name = this.ancestorNames[i].toLowerCase();
+                feature = record.get(featureName);
+            if (feature) {
+                var objID = feature.ObjectID;
+                var featureObj = featureHash[objID];
+                for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
+                    var name = this.portfolioItemTypeDefs[i].TypePath.toLowerCase().replace('portfolioitem/', '');
 
-                    if (featureParentObj) {
-                        if (featureParentObj[name]) {
-                            record.set(name, featureParentObj[name]);
-                        } else {
-                            record.set(name, featureParentObj);
-                        }
+                    if (featureObj && featureObj[name]) {
+                        record.set(name, featureObj[name]);
                     } else {
                         record.set(name, null);
                     }
@@ -202,21 +208,24 @@ Ext.define("feature-ancestor-grid", {
     updateFeatureHashWithWsapiRecords: function (results) {
 
         var hash = {},
-            featureParents = [],
-            featureParentTypePath = this.getFeatureParentTypePath().toLowerCase();
+            features = [],
+            featureTypePath = this.getPortfolioItemTypePaths()[0].toLowerCase(),
+            ancestorNames = _.map(this.getPortfolioItemTypePaths(), function (pi) {
+                return pi.toLowerCase().replace('portfolioitem/', '');
+            });
 
         Ext.Array.each(results, function (res) {
             Ext.Array.each(res, function (pi) {
                 hash[pi.get('ObjectID')] = pi.getData();
-                if (pi.get('_type').toLowerCase() === featureParentTypePath) {
-                    featureParents.push(pi);
+                if (pi.get('_type') === featureTypePath) {
+                    features.push(pi);
                 }
             });
         });
 
-        this.logger.log('updateFeatureHashWithWsapiRecords', this.ancestorNames, results);
+        this.logger.log('updateFeatureHashWithWsapiRecords', ancestorNames, results);
         var featureHash = this.getFeatureAncestorHash();
-        Ext.Array.each(featureParents, function (s) {
+        Ext.Array.each(features, function (s) {
 
             var parent = s.get('Parent') && s.get('Parent').ObjectID || null,
                 objID = s.get('ObjectID');
@@ -224,13 +233,13 @@ Ext.define("feature-ancestor-grid", {
             if (!featureHash[objID]) {
                 featureHash[objID] = hash[objID];
                 //initialize
-                Ext.Array.each(this.ancestorNames, function (a) { featureHash[objID][a.toLowerCase()] = null; });
+                Ext.Array.each(ancestorNames, function (a) { featureHash[objID][a] = null; });
             }
 
             if (parent && featureHash[objID]) {
                 do {
                     var parentObj = hash[parent] || null,
-                        parentName = hash[parent] && hash[parent]._type.replace(/portfolioitem\//ig, '');
+                        parentName = hash[parent] && hash[parent]._type.replace('portfolioitem/', '');
 
                     if (featureHash[objID]) {
                         featureHash[objID][parentName] = parentObj;
@@ -239,18 +248,18 @@ Ext.define("feature-ancestor-grid", {
                 } while (parent !== null);
             }
         });
-        console.log('Feature Hash', featureHash);
+
     },
     fetchAncestors: function (featureOids) {
         var deferred = Ext.create('Deft.Deferred');
 
         var promises = [];
-        for (var i = 1; i < this.getPortfolioItemTypePaths().length; i++) {
+        for (var i = 0; i < this.getPortfolioItemTypePaths().length; i++) {
             var type = this.getPortfolioItemTypePaths()[i];
 
             var filterProperties = ['ObjectID'];
 
-            for (var j = 1; j < i; j++) {
+            for (var j = 0; j < i; j++) {
                 filterProperties.unshift('Children');
             }
 
@@ -282,37 +291,34 @@ Ext.define("feature-ancestor-grid", {
             },
             failure: this.showErrorNotification,
             scope: this
-        }).always(function () {
-            this.setLoading(false);
-            this.onResize();
-        }, this);
+        }).always(function () { this.setLoading(false); }, this);
         return deferred;
 
 
     },
 
-    updateFeatures: function (store, node, records, operation) {
-        this.logger.log('updateFeatures', records, operation);
+    updateStories: function (store, node, records, operation) {
+        this.logger.log('updateStories', records, operation);
 
-        if (records.length === 0 || records[0].get('_type').toLowerCase() !== this.getFeatureTypePath().toLowerCase()) {
-            console.log('Update Features method. No records found or type doesnt match');
+        if (records.length === 0 || records[0].get('_type') !== 'hierarchicalrequirement') {
             return;
         }
-        var featureParentHash = this.getFeatureAncestorHash(),
-            featureParentOids = [];
+        var featureName = this.getFeatureName(),
+            featureHash = this.getFeatureAncestorHash(),
+            featureOids = [];
 
         Ext.Array.each(records, function (r) {
-            var featureParent = r.get('Parent');
-            if (featureParent && !featureParentHash[featureParent.ObjectID]) {
-                if (!Ext.Array.contains(featureParentOids, featureParent.ObjectID)) {
-                    featureParentOids.push(featureParent.ObjectID);
+            var feature = r.get(featureName);
+            if (feature && !featureHash[feature.ObjectID]) {
+                if (!Ext.Array.contains(featureOids, feature.ObjectID)) {
+                    featureOids.push(feature.ObjectID);
                 }
             }
         }, this);
-        this.logger.log('featureParentOids', featureParentOids);
+        this.logger.log('featureOids', featureOids);
 
-        if (featureParentOids.length > 0) {
-            this.fetchAncestors(featureParentOids).then({
+        if (featureOids.length > 0) {
+            this.fetchAncestors(featureOids).then({
                 success: function (results) {
                     this.updateFeatureHashWithWsapiRecords(results);
                     this.setAncestors(records);
@@ -321,15 +327,15 @@ Ext.define("feature-ancestor-grid", {
                 scope: this
             });
         } else {
-            this.setAncestors(records);
+            this.setAncestors(records)
         }
     },
     _addGridboard: function (store, filters, dataContext) {
-        for (var i = 1; i < this.ancestorNames.length; i++) {
-            var name = this.ancestorNames[i].toLowerCase();
+        for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
+            var name = this.portfolioItemTypeDefs[i].Name.toLowerCase();
             store.model.addField({ name: name, type: 'auto', defaultValue: null });
         }
-        store.on('load', this.updateFeatures, this);
+        store.on('load', this.updateStories, this);
         let gridArea = this.down('#grid-area');
 
         gridArea.add({
@@ -349,8 +355,7 @@ Ext.define("feature-ancestor-grid", {
                 },
                 columnCfgs: this.getColumnConfigs(),
                 derivedColumns: this.getDerivedColumns()
-            },
-            height: this.getHeight()
+            }
         });
     },
     getGridPlugins: function () {
@@ -361,6 +366,7 @@ Ext.define("feature-ancestor-grid", {
             ptype: 'rallygridboardfieldpicker',
             headerPosition: 'left',
             modelNames: this.getModelNames(),
+            alwaysSelectedValues: [this.getFeatureName()],
             stateful: true,
             margin: '3 3 3 25',
             stateId: this.getContext().getScopedStateId('ancestor-columns-1')
@@ -382,6 +388,7 @@ Ext.define("feature-ancestor-grid", {
                             flex: 2
                         }
                     }
+
                 }
             }
         }, {
@@ -389,7 +396,11 @@ Ext.define("feature-ancestor-grid", {
             menuItems: [
                 {
                     text: 'Export...',
-                    handler: this._export,
+                    handler: function () { this._export(false); },
+                    scope: this
+                }, {
+                    text: 'Export Stories and Tasks...',
+                    handler: this._deepExport,
                     scope: this
                 }
             ],
@@ -404,30 +415,31 @@ Ext.define("feature-ancestor-grid", {
         this.logger.log('getExportFilters', filters.toString());
         return filters;
     },
-    updateExportFeatures: function (records) {
+    updateExportStories: function (records) {
         var deferred = Ext.create('Deft.Deferred');
 
-        this.logger.log('updateExportFeatures', records);
+        this.logger.log('updateExportStories', records);
 
-        if (records.length === 0 || records[0].get('_type').toLowerCase() !== this.getFeatureTypePath().toLowerCase()) {
+        if (records.length === 0 || records[0].get('_type') !== 'hierarchicalrequirement') {
             deferred.resolve([]);
         }
-
-        var featureParentHash = this.getFeatureAncestorHash(),
-            featureParentOids = [];
+        var featureName = this.getFeatureName(),
+            featureHash = this.getFeatureAncestorHash(),
+            featureOids = [];
 
         Ext.Array.each(records, function (r) {
-            var featureParent = r.get('Parent');
-            if (featureParent && !featureParentHash[featureParent.ObjectID]) {
-                if (!Ext.Array.contains(featureParentOids, featureParent.ObjectID)) {
-                    featureParentOids.push(featureParent.ObjectID);
+            var feature = r.get(featureName);
+            if (feature && !featureHash[feature.ObjectID]) {
+                if (!Ext.Array.contains(featureOids, feature.ObjectID)) {
+                    featureOids.push(feature.ObjectID);
                 }
+
             }
         }, this);
-        this.logger.log('featureParentOids', featureParentOids);
+        this.logger.log('featureOids', featureOids);
 
-        if (featureParentOids.length > 0) {
-            this.fetchAncestors(featureParentOids).then({
+        if (featureOids.length > 0) {
+            this.fetchAncestors(featureOids).then({
                 success: function (results) {
                     this.updateFeatureHashWithWsapiRecords(results);
                     this.setAncestors(records);
@@ -446,9 +458,10 @@ Ext.define("feature-ancestor-grid", {
         return deferred;
     },
     _deepExport: function () {
-        this._export();
+        this._export(true);
     },
-    _export: async function () {
+    _export: async function (includeTasks) {
+
         var filters = await this.getExportFilters();
 
         var columnCfgs = this.down('rallytreegrid').columns,
@@ -457,29 +470,95 @@ Ext.define("feature-ancestor-grid", {
             columns = Ext.Array.merge(additionalFields, derivedFields);
 
         var fetch = _.pluck(additionalFields, 'dataIndex');
-        fetch.push('ObjectID');
-        fetch.push('Parent');
+        fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName']);
+        if (includeTasks) {
+            fetch.push('Tasks');
+        }
+        if (!Ext.Array.contains(fetch, this.getFeatureName())) {
+            fetch.push(this.getFeatureName());
+        }
         this.setLoading('Loading data to export...');
         this.logger.log('columns', columnCfgs);
         this.fetchWsapiRecords({
-            model: this.getFeatureTypePath(),
+            model: 'HierarchicalRequirement',
             fetch: fetch,
             filters: filters,
             limit: 'Infinity'
         }).then({
-            success: this.updateExportFeatures,
+            success: this.updateExportStories,
             scope: this
         }).then({
             success: function (records) {
-                var csv = this.getExportCSV(records, columns);
-                var filename = Ext.String.format("export-{0}.csv", Ext.Date.format(new Date(), "Y-m-d-h-i-s"));
-                CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
+                if (includeTasks) {
+                    this._exportTasks(records, fetch, columns);
+                } else {
+                    var csv = this.getExportCSV(records, columns);
+                    var filename = Ext.String.format("export-{0}.csv", Ext.Date.format(new Date(), "Y-m-d-h-i-s"));
+                    CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
+                }
             },
             failure: this.showErrorNotification,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
     },
+    _exportTasks: function (userStories, fetch, columns) {
 
+        var oids = [];
+        for (var i = 0; i < userStories.length; i++) {
+            if (userStories[i].get('Tasks') && userStories[i].get('Tasks').Count) {
+                oids.push(userStories[i].get('ObjectID'));
+            }
+        }
+        var filters = Ext.Array.map(oids, function (o) {
+            return {
+                property: 'WorkProduct.ObjectID',
+                value: o
+            };
+        });
+        filters = Rally.data.wsapi.Filter.or(filters);
+
+        fetch.push('WorkProduct');
+        this.fetchWsapiRecords({
+            model: 'Task',
+            fetch: fetch,
+            filters: filters,
+            limit: 'Infinity',
+            enablePostGet: true
+        }).then({
+            success: function (tasks) {
+                this.logger.log('exportTasks', tasks.length);
+                var taskHash = {};
+                for (var j = 0; j < tasks.length; j++) {
+                    if (!taskHash[tasks[j].get('WorkProduct').ObjectID]) {
+                        taskHash[tasks[j].get('WorkProduct').ObjectID] = [];
+                    }
+                    taskHash[tasks[j].get('WorkProduct').ObjectID].push(tasks[j]);
+                }
+
+                var rows = [];
+                for (var j = 0; j < userStories.length; j++) {
+                    rows.push(userStories[j]);
+                    var ts = taskHash[userStories[j].get('ObjectID')];
+                    if (ts && ts.length > 0) {
+                        rows = rows.concat(ts);
+                    }
+                }
+
+                columns.push({
+                    dataIndex: 'WorkProduct',
+                    text: 'User Story'
+                });
+                var csv = this.getExportCSV(rows, columns);
+                var filename = Ext.String.format("export-{0}.csv", Ext.Date.format(new Date(), "Y-m-d-h-i-s"));
+                CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
+            },
+            failure: function (msg) {
+                var msg = "Unable to export tasks due to error:  " + msg
+                this.showErrorNotification(msg);
+            },
+            scope: this
+        });
+    },
     getExportCSV: function (records, columns) {
         var standardColumns = _.filter(columns, function (c) { return c.dataIndex || null; }),
             headers = _.map(standardColumns, function (c) { if (c.text === "ID") { return "Formatted ID"; } return c.text; }),
@@ -499,10 +578,8 @@ Ext.define("feature-ancestor-grid", {
                 record = records[i];
 
             for (var j = 0; j < fetchList.length; j++) {
-                var val = record.get(fetchList[j]);
-                if (Ext.isObject(val)) {
-                    val = val.FormattedID || val._refObjectName;
-                }
+                var val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ');
+
                 row.push(val || "");
             }
 
@@ -526,22 +603,27 @@ Ext.define("feature-ancestor-grid", {
             dataIndex: 'Name',
             text: 'Name'
         }, {
-            dataIndex: 'State',
-            text: 'State'
-        }
-        ].concat(this.getDerivedColumns());
+            dataIndex: 'ScheduleState',
+            text: 'Schedule State'
+        }, {
+            dataIndex: this.getFeatureName(),
+            text: this.getFeatureName()
+        }].concat(this.getDerivedColumns());
         this.logger.log('cols', cols);
         return cols;
     },
     getDerivedColumns: function () {
         var cols = [];
-        for (var i = 1; i < this.ancestorNames.length; i++) {
-            var name = this.ancestorNames[i];
+        //Ext.Array.each(this.portfolioItemTypeDefs, function(p){
+        for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
+
+            var name = this.portfolioItemTypeDefs[i].TypePath.toLowerCase().replace('portfolioitem/', '');
 
             cols.push({
-                ancestorName: name.toLowerCase(),
+                // dataIndex: name,
+                ancestorName: name,
                 xtype: 'ancestortemplatecolumn',
-                text: name
+                text: this.portfolioItemTypeDefs[i].Name
             });
         }
 
