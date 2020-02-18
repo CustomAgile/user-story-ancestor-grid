@@ -14,12 +14,80 @@ Ext.define("feature-ancestor-grid", {
         }
     },
 
+    layout: {
+        type: 'vbox',
+        align: 'stretch'
+    },
+
+    items: [
+        {
+            id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
+            xtype: 'container',
+            layout: {
+                type: 'hbox',
+                align: 'middle',
+                defaultMargins: '0 10 10 0',
+            }
+        }, {
+            id: Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID,
+            xtype: 'container',
+            layout: {
+                type: 'hbox',
+                align: 'middle',
+                defaultMargins: '0 10 10 0',
+            }
+        }, {
+            id: 'grid-area',
+            itemId: 'grid-area',
+            xtype: 'container',
+            flex: 1,
+            type: 'vbox',
+            align: 'stretch'
+        }
+    ],
+
     launch: function () {
-        this.fetchPortfolioItemTypes().then({
-            success: this.initializeApp,
-            failure: this.showErrorNotification,
-            scope: this
+        Rally.data.wsapi.Proxy.superclass.timeout = 180000;
+        Rally.data.wsapi.batch.Proxy.superclass.timeout = 180000;
+        this.down('#' + Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID).on('resize', this.onResize, this);
+
+        this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
+            ptype: 'UtilsAncestorPiAppFilter',
+            pluginId: 'ancestorFilterPlugin',
+            settingsConfig: {},
+            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA'],
+            filtersHidden: false,
+            visibleTab: 'portfolioitem/feature',
+            listeners: {
+                scope: this,
+                ready(plugin) {
+                    Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes().then({
+                        scope: this,
+                        success(portfolioItemTypes) {
+                            this.portfolioItemTypes = _.sortBy(portfolioItemTypes, type => type.get('Ordinal'));
+
+                            plugin.addListener({
+                                scope: this,
+                                select: this._buildGridboardStore,
+                                change: this._buildGridboardStore
+                            });
+
+                            this.initializeApp();
+                        },
+                        failure(msg) {
+                            this.showErrorNotification(msg);
+                        },
+                    });
+                },
+            }
         });
+        this.addPlugin(this.ancestorFilterPlugin);
+
+        // this.fetchPortfolioItemTypes().then({
+        //     success: this.initializeApp,
+        //     failure: this.showErrorNotification,
+        //     scope: this
+        // });
 
     },
     showErrorNotification: function (msg) {
@@ -27,8 +95,8 @@ Ext.define("feature-ancestor-grid", {
             message: msg
         });
     },
-    initializeApp: function (portfolioTypes) {
-        this.portfolioItemTypeDefs = _.map(portfolioTypes, function (p) { return p.getData(); });
+    initializeApp: function () {
+        this.portfolioItemTypeDefs = _.map(this.portfolioItemTypes, function (p) { return p.getData(); });
         this.ancestorNames = _.map(this.getPortfolioItemTypePaths(), function (pi) {
             return pi.replace(/portfolioitem\//ig, '');
         });
@@ -49,42 +117,6 @@ Ext.define("feature-ancestor-grid", {
     getPortfolioItemTypePaths: function () {
         return _.pluck(this.portfolioItemTypeDefs, 'TypePath');
     },
-    fetchPortfolioItemTypes: function () {
-        return this.fetchWsapiRecords({
-            model: 'TypeDefinition',
-            fetch: ['TypePath', 'Ordinal', 'Name'],
-            context: { workspace: this.getContext().getWorkspace()._ref },
-            filters: [{
-                property: 'Parent.Name',
-                operator: '=',
-                value: 'Portfolio Item'
-            },
-            {
-                property: 'Creatable',
-                operator: '=',
-                value: 'true'
-            }],
-            sorters: [{
-                property: 'Ordinal',
-                direction: 'ASC'
-            }]
-        });
-    },
-    fetchSnapshots: function (config) {
-        var deferred = Ext.create('Deft.Deferred');
-
-        Ext.create('Rally.data.lookback.SnapshotStore', config).load({
-            callback: function (snapshots, operation) {
-                if (operation.wasSuccessful()) {
-                    deferred.resolve(snapshots);
-                } else {
-                    deferred.reject('Failed to load snapshots: ', operation && operation.error && operation.error.errors.join(','))
-                }
-            }
-        });
-
-        return deferred;
-    },
     getQueryFilter: function () {
         var query = this.getSetting('query');
         if (query && query.length > 0) {
@@ -93,17 +125,41 @@ Ext.define("feature-ancestor-grid", {
         }
         return [];
     },
-    _buildGridboardStore: function () {
+    getFilters: async function () {
+        let filters = this.getQueryFilter();
+        let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getFeatureTypePath(), true).catch((e) => {
+            this.showErrorNotification(e.message || e);
+            this.setLoading(false);
+            return;
+        });
+
+        if (ancestorAndMultiFilters) {
+            filters = filters.concat(ancestorAndMultiFilters);
+        }
+
+        return filters;
+    },
+    _buildGridboardStore: async function () {
         this.logger.log('_buildGridboardStore');
-        this.removeAll();
+        this.down('#grid-area').removeAll();
+        let filters = await this.getFilters();
+        let dataContext = this.getContext().getDataContext();
+        if (this.searchAllProjects()) {
+            dataContext.project = null;
+        }
 
         Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
             models: this.getModelNames(),
             enableHierarchy: true,
             fetch: ['Parent', 'ObjectID'],
-            filters: this.getQueryFilter()
+            context: dataContext,
+            enablePostGet: true,
+            remoteSort: true,
+            filters
         }).then({
-            success: this._addGridboard,
+            success: function (store) {
+                this._addGridboard(store, filters, dataContext);
+            },
             failure: this.showErrorNotification,
             scope: this
         });
@@ -226,7 +282,10 @@ Ext.define("feature-ancestor-grid", {
             },
             failure: this.showErrorNotification,
             scope: this
-        }).always(function () { this.setLoading(false); }, this);
+        }).always(function () {
+            this.setLoading(false);
+            this.onResize();
+        }, this);
         return deferred;
 
 
@@ -265,24 +324,28 @@ Ext.define("feature-ancestor-grid", {
             this.setAncestors(records);
         }
     },
-    _addGridboard: function (store) {
+    _addGridboard: function (store, filters, dataContext) {
         for (var i = 1; i < this.ancestorNames.length; i++) {
             var name = this.ancestorNames[i].toLowerCase();
             store.model.addField({ name: name, type: 'auto', defaultValue: null });
         }
         store.on('load', this.updateFeatures, this);
+        let gridArea = this.down('#grid-area');
 
-        this.add({
+        gridArea.add({
             xtype: 'rallygridboard',
             context: this.getContext(),
             modelNames: this.getModelNames(),
+            height: gridArea.getHeight(),
             toggleState: 'grid',
             plugins: this.getGridPlugins(),
             stateful: false,
             gridConfig: {
                 store: store,
                 storeConfig: {
-                    filters: this.getQueryFilter()
+                    filters,
+                    context: dataContext,
+                    enablePostGet: true
                 },
                 columnCfgs: this.getColumnConfigs(),
                 derivedColumns: this.getDerivedColumns()
@@ -305,23 +368,20 @@ Ext.define("feature-ancestor-grid", {
             ptype: 'rallygridboardinlinefiltercontrol',
             inlineFilterButtonConfig: {
                 stateful: true,
-                stateId: this.getContext().getScopedStateId('ancestor-filters'),
+                stateId: this.getContext().getScopedStateId('ancestor-filters-old-filter'),
                 modelNames: this.getModelNames(),
                 margin: 3,
+                hidden: true,
                 inlineFilterPanelConfig: {
+                    hidden: true,
                     quickFilterPanelConfig: {
-                        defaultFields: [
-                            'ArtifactSearch',
-                            'Owner',
-                            'ModelType'
-                        ]
+                        defaultFields: ['Owner']
                     },
                     advancedFilterPanelConfig: {
                         advancedFilterRowsConfig: {
                             flex: 2
                         }
                     }
-
                 }
             }
         }, {
@@ -332,11 +392,6 @@ Ext.define("feature-ancestor-grid", {
                     handler: this._export,
                     scope: this
                 }
-                // , {
-                //     text: 'Export Stories and Tasks...',
-                //     handler: this._deepExport,
-                //     scope: this
-                // }
             ],
             buttonConfig: {
                 margin: 3,
@@ -344,17 +399,8 @@ Ext.define("feature-ancestor-grid", {
             }
         }];
     },
-    getExportFilters: function () {
-        var filters = this.getQueryFilter(),
-            gridFilters = this.down('rallygridboard').currentCustomFilter.filters || [];
-
-        if (filters.length > 0 && gridFilters.length > 0) {
-            filters = filters.and(gridFilters);
-        } else {
-            if (gridFilters.length > 0) {
-                filters = gridFilters;
-            }
-        }
+    getExportFilters: async function () {
+        var filters = await this.getFilters();
         this.logger.log('getExportFilters', filters.toString());
         return filters;
     },
@@ -402,8 +448,8 @@ Ext.define("feature-ancestor-grid", {
     _deepExport: function () {
         this._export();
     },
-    _export: function () {
-        var filters = this.getExportFilters();
+    _export: async function () {
+        var filters = await this.getExportFilters();
 
         var columnCfgs = this.down('rallytreegrid').columns,
             additionalFields = _.filter(columnCfgs, function (c) { return c.text !== 'Rank' && (c.xtype === 'rallyfieldcolumn' || c.xtype === "treecolumn"); }),
@@ -413,12 +459,6 @@ Ext.define("feature-ancestor-grid", {
         var fetch = _.pluck(additionalFields, 'dataIndex');
         fetch.push('ObjectID');
         fetch.push('Parent');
-        // if (includeTasks) {
-        //     fetch.push('Tasks');
-        // }
-        // if (!Ext.Array.contains(fetch, this.getFeatureName())) {
-        //     fetch.push(this.getFeatureName());
-        // }
         this.setLoading('Loading data to export...');
         this.logger.log('columns', columnCfgs);
         this.fetchWsapiRecords({
@@ -431,76 +471,15 @@ Ext.define("feature-ancestor-grid", {
             scope: this
         }).then({
             success: function (records) {
-                // if (includeTasks) {
-                //     this._exportTasks(records, fetch, columns);
-                // } else {
                 var csv = this.getExportCSV(records, columns);
                 var filename = Ext.String.format("export-{0}.csv", Ext.Date.format(new Date(), "Y-m-d-h-i-s"));
                 CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
-                // }
             },
             failure: this.showErrorNotification,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
     },
-    // _exportTasks: function (userStories, fetch, columns) {
 
-    //     var oids = [];
-    //     for (var i = 0; i < userStories.length; i++) {
-    //         if (userStories[i].get('Tasks') && userStories[i].get('Tasks').Count) {
-    //             oids.push(userStories[i].get('ObjectID'));
-    //         }
-    //     }
-    //     var filters = Ext.Array.map(oids, function (o) {
-    //         return {
-    //             property: 'WorkProduct.ObjectID',
-    //             value: o
-    //         };
-    //     });
-    //     filters = Rally.data.wsapi.Filter.or(filters);
-
-    //     fetch.push('WorkProduct');
-    //     this.fetchWsapiRecords({
-    //         model: 'Task',
-    //         fetch: fetch,
-    //         filters: filters,
-    //         limit: 'Infinity',
-    //         enablePostGet: true
-    //     }).then({
-    //         success: function (tasks) {
-    //             this.logger.log('exportTasks', tasks.length);
-    //             var taskHash = {};
-    //             for (var j = 0; j < tasks.length; j++) {
-    //                 if (!taskHash[tasks[j].get('WorkProduct').ObjectID]) {
-    //                     taskHash[tasks[j].get('WorkProduct').ObjectID] = [];
-    //                 }
-    //                 taskHash[tasks[j].get('WorkProduct').ObjectID].push(tasks[j]);
-    //             }
-
-    //             var rows = [];
-    //             for (var j = 0; j < userStories.length; j++) {
-    //                 rows.push(userStories[j]);
-    //                 var ts = taskHash[userStories[j].get('ObjectID')];
-    //                 if (ts && ts.length > 0) {
-    //                     rows = rows.concat(ts);
-    //                 }
-    //             }
-
-    //             columns.push({
-    //                 dataIndex: 'WorkProduct',
-    //                 text: 'User Story'
-    //             });
-    //             var csv = this.getExportCSV(rows, columns);
-    //             var filename = Ext.String.format("export-{0}.csv", Ext.Date.format(new Date(), "Y-m-d-h-i-s"));
-    //             CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
-    //         },
-    //         failure: function (msg) {
-    //             var msg = "Unable to export tasks due to error:  " + msg
-    //             this.showErrorNotification(msg);
-    //         },
-    //         scope: this
-    //     });
-    // },
     getExportCSV: function (records, columns) {
         var standardColumns = _.filter(columns, function (c) { return c.dataIndex || null; }),
             headers = _.map(standardColumns, function (c) { if (c.text === "ID") { return "Formatted ID"; } return c.text; }),
@@ -582,6 +561,15 @@ Ext.define("feature-ancestor-grid", {
         return deferred;
     },
 
+    onResize() {
+        this.callParent(arguments);
+        let gridboard = this.down('rallygridboard');
+        let gridArea = this.down('#grid-area');
+        if (gridArea && gridboard) {
+            gridboard.setHeight(gridArea.getHeight());
+        }
+    },
+
     getOptions: function () {
         return [
             {
@@ -631,10 +619,13 @@ Ext.define("feature-ancestor-grid", {
         return typeof (this.getAppId()) == 'undefined';
     },
 
+    searchAllProjects() {
+        return this.ancestorFilterPlugin.getIgnoreProjectScope();
+    },
+
     //onSettingsUpdate:  Override
     onSettingsUpdate: function (settings) {
         this.logger.log('onSettingsUpdate', settings);
-        // Ext.apply(this, settings);
         this._buildGridboardStore();
     }
 });

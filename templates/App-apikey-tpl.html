@@ -1,30 +1,35 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title><%= name %></title>
-    <!--  (c) 2016 CA Technologies.  All Rights Reserved. -->
+    <!--  (c) 2020 Custom Agile.  All Rights Reserved. -->
     <!--  Build Date: <%= new Date() %> -->
-    
+    <!-- Repository: <%= repository %> -->
+
     <script type="text/javascript">
         var APP_BUILD_DATE = "<%= new Date() %>";
     </script>
-    
-    <script type="text/javascript" src="<%= auth.server %>/apps/<%= sdk %>/sdk-debug.js?apiKey=__PUT_API_KEY_HERE__"></script>
+
+    <script type="text/javascript"
+        src="<%= auth.server %>/apps/<%= sdk %>/sdk-debug.js?apiKey=__PUT_API_KEY_HERE__"></script>
 
     <script type="text/javascript">
-        Rally.onReady(function() {
+        Rally.onReady(function () {
             <%= js_contents %>
-            
-               Rally.launchApp('<%= className %>', {
-                   name: '<%= name %>'
-               });
+
+                Rally.launchApp('<%= className %>', {
+                    name: '<%= name %>'
+                });
         });
     </script>
-    
+
     <style type="text/css">
-<%= style_contents %>
+        <%=style_contents %>
     </style>
 
 </head>
+
 <body></body>
+
 </html>
