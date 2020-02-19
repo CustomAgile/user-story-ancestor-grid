@@ -1,6 +1,6 @@
 {
   "name": "user-story-ancestor-grid",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "scripts": {
     "debug": "grunt debug",
     "debug:watch": "nodemon --exec grunt debug",

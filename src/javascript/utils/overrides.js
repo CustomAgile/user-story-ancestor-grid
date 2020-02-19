@@ -42,3 +42,15 @@ Ext.override(Rally.ui.grid.TreeGrid, {
         }
     }
 });
+
+Ext.override(Rally.ui.grid.TreeView, {
+    _errorHandler: function (errors) {
+        _.each(errors, function (error) {
+            if (error) {
+                Rally.ui.notify.Notifier.showError({
+                    message: error
+                })
+            }
+        })
+    }
+});

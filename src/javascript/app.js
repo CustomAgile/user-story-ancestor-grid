@@ -123,6 +123,10 @@ Ext.define("user-story-ancestor-grid", {
             }]
         });
     },
+    onTimeboxScopeChange: function () {
+        this.callParent(arguments);
+        this._buildGridboardStore();
+    },
     getFilters: async function () {
         let filters = this.getQueryFilter();
         let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getModelName(), true).catch((e) => {
@@ -130,6 +134,10 @@ Ext.define("user-story-ancestor-grid", {
             this.setLoading(false);
             return;
         });
+        let timeboxScope = this.getContext().getTimeboxScope();
+        if (timeboxScope) {
+            filters.push(timeboxScope.getQueryFilter());
+        }
 
         if (ancestorAndMultiFilters) {
             filters = filters.concat(ancestorAndMultiFilters);
@@ -300,7 +308,7 @@ Ext.define("user-story-ancestor-grid", {
     updateStories: function (store, node, records, operation) {
         this.logger.log('updateStories', records, operation);
 
-        if (records.length === 0 || records[0].get('_type') !== 'hierarchicalrequirement') {
+        if (!records || records.length === 0 || records[0].get('_type') !== 'hierarchicalrequirement') {
             return;
         }
         var featureName = this.getFeatureName(),
@@ -336,6 +344,10 @@ Ext.define("user-story-ancestor-grid", {
             store.model.addField({ name: name, type: 'auto', defaultValue: null });
         }
         store.on('load', this.updateStories, this);
+        store.on('error', function (e) {
+            this.showErrorNotification('Error while loading user story store');
+        }, this);
+
         let gridArea = this.down('#grid-area');
 
         gridArea.add({
@@ -350,6 +362,7 @@ Ext.define("user-story-ancestor-grid", {
                 store: store,
                 storeConfig: {
                     filters,
+                    // groupString: 'c_Tranche',
                     context: dataContext,
                     enablePostGet: true
                 },
