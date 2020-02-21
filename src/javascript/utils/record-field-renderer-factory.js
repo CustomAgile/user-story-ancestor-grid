@@ -8,7 +8,10 @@ Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
         let val = record.get(field);
         let d = delimiter || ', ';
 
-        if (_.isUndefined(val) || val === null) {
+        if (field === 'c_Tranche') {
+            val = (record.get('Feature') && record.get('Feature').c_Tranche) || '';
+        }
+        else if (_.isUndefined(val) || val === null) {
             val = "";
         }
         else if (typeof val === 'boolean') {
@@ -17,14 +20,14 @@ Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
         else if (Ext.isDate(val)) {
             val = Rally.util.DateTime.formatWithDefaultDateTime(val);
         }
+        else if (field === 'Feature') {
+            val = (record.get('Feature') && (record.get('Feature').FormattedID + ': ' + record.get('Feature').Name)) || '';
+        }
         else if (field === 'Parent') {
             val = (val && val.Parent && val.Parent._refObjectName) || (record.get('Feature') && record.get('Feature')._refObjectName) || 'No Parent';
         }
         else if (field === 'Release') {
             val = (val && val.Name) || 'Unscheduled';
-        }
-        else if (field === 'Parent') {
-            val = (val && val.Name) ? `${val.FormattedID} - ${val.Name}` : '';
         }
         else if (field === 'Project') {
             val = (val && val.Name) || 'Failed to convert project field';

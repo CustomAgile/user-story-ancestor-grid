@@ -165,7 +165,7 @@ Ext.define("user-story-ancestor-grid", {
         Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
             models: this.getModelNames(),
             enableHierarchy: true,
-            fetch: [this.getFeatureName(), 'ObjectID'],
+            fetch: [this.getFeatureName(), 'ObjectID', 'c_Tranche'],
             context: dataContext,
             enablePostGet: true,
             remoteSort: true,
@@ -362,7 +362,6 @@ Ext.define("user-story-ancestor-grid", {
                 store: store,
                 storeConfig: {
                     filters,
-                    // groupString: 'c_Tranche',
                     context: dataContext,
                     enablePostGet: true
                 },
@@ -483,7 +482,7 @@ Ext.define("user-story-ancestor-grid", {
             columns = Ext.Array.merge(additionalFields, derivedFields);
 
         var fetch = _.pluck(additionalFields, 'dataIndex');
-        fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName']);
+        fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName', 'c_Tranche']);
         if (includeTasks) {
             fetch.push('Tasks');
         }
@@ -575,13 +574,22 @@ Ext.define("user-story-ancestor-grid", {
     getExportCSV: function (records, columns) {
         var standardColumns = _.filter(columns, function (c) { return c.dataIndex || null; }),
             headers = _.map(standardColumns, function (c) { if (c.text === "ID") { return "Formatted ID"; } return c.text; }),
-            fetchList = _.map(standardColumns, function (c) { return c.dataIndex; }),
+            fetchList = _.map(standardColumns, function (c) { return c.dataIndex }),
             derivedColumns = this.getDerivedColumns();
+
+        if (!_.contains(headers, 'Tranche')) {
+            headers.push('Tranche');
+        }
+        if (!_.contains(fetchList, 'c_Tranche')) {
+            fetchList.push('c_Tranche');
+        }
 
         this.logger.log('getExportCSV', headers, fetchList);
 
         Ext.Array.each(derivedColumns, function (d) {
-            headers.push(d.text);
+            if (d.text !== 'Tranche') {
+                headers.push(d.text);
+            }
         });
 
         var csv = [headers.join(',')];
@@ -597,11 +605,13 @@ Ext.define("user-story-ancestor-grid", {
             }
 
             Ext.Array.each(derivedColumns, function (d) {
-                var ancestor = record.get(d.ancestorName);
-                if (ancestor) {
-                    row.push(Ext.String.format("{0}: {1}", ancestor.FormattedID, ancestor.Name));
-                } else {
-                    row.push("");
+                if (d.text !== 'Tranche') {
+                    var ancestor = record.get(d.ancestorName);
+                    if (ancestor) {
+                        row.push(Ext.String.format("{0}: {1}", ancestor.FormattedID, ancestor.Name));
+                    } else {
+                        row.push("");
+                    }
                 }
             });
 
@@ -626,8 +636,11 @@ Ext.define("user-story-ancestor-grid", {
         return cols;
     },
     getDerivedColumns: function () {
-        var cols = [];
-        //Ext.Array.each(this.portfolioItemTypeDefs, function(p){
+        var cols = [{
+            xtype: 'tranchetemplatecolumn',
+            text: 'Tranche'
+        }];
+
         for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
 
             var name = this.portfolioItemTypeDefs[i].TypePath.toLowerCase().replace('portfolioitem/', '');

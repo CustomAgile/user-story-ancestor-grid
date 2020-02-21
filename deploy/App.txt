@@ -4,12 +4,12 @@
 <head>
     <title>user-story-ancestor-grid-1.0.3</title>
     <!--  (c) 2020 Custom Agile.  All Rights Reserved. -->
-    <!--  Build Date: Wed Feb 19 2020 23:16:11 GMT+0100 (Central European Standard Time) -->
+    <!--  Build Date: Fri Feb 21 2020 21:17:34 GMT+0100 (Central European Standard Time) -->
     <!--  Repository: https://github.com/CustomAgile/user-story-ancestor-grid -->
 
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Wed Feb 19 2020 23:16:11 GMT+0100 (Central European Standard Time)";
-        var CHECKSUM = 1374369666524;
+        var APP_BUILD_DATE = "Fri Feb 21 2020 21:17:34 GMT+0100 (Central European Standard Time)";
+        var CHECKSUM = 1388682447422;
     </script>
 
     <script type="text/javascript" src="/apps/2.1/sdk.js"></script>
@@ -204,6 +204,32 @@ Ext.define('Rally.technicalservices.Logger',{
 
 });
 
+Ext.define('CArABU.technicalservices.TrancheTemplateColumn', {
+    extend: 'Ext.grid.column.Template',
+    alias: ['widget.tranchetemplatecolumn'],
+
+    align: 'right',
+
+    initComponent: function () {
+        var me = this;
+
+        me.tpl = new Ext.XTemplate('<tpl><div style="text-align:right;">{[this.getTrancheString(values)]}</div></tpl>', {
+            getTrancheString: function (values) {
+                return values.c_Tranche || '';
+            }
+
+        });
+        // me.hasCustomRenderer = true;
+        me.callParent(arguments);
+    },
+    getValue: function () {
+        return values[this.dataIndex] || 0;
+    },
+    defaultRenderer: function (value, meta, record) {
+        var data = Ext.apply({}, record.get('Feature')); //, record.getAssociatedData());
+        return this.tpl.apply(data);
+    }
+});
 Ext.define('CArABU.technicalservices.AncestorTemplateColumn', {
     extend: 'Ext.grid.column.Template',
     alias: ['widget.ancestortemplatecolumn'],
@@ -245,7 +271,10 @@ Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
         let val = record.get(field);
         let d = delimiter || ', ';
 
-        if (_.isUndefined(val) || val === null) {
+        if (field === 'c_Tranche') {
+            val = (record.get('Feature') && record.get('Feature').c_Tranche) || '';
+        }
+        else if (_.isUndefined(val) || val === null) {
             val = "";
         }
         else if (typeof val === 'boolean') {
@@ -254,14 +283,14 @@ Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
         else if (Ext.isDate(val)) {
             val = Rally.util.DateTime.formatWithDefaultDateTime(val);
         }
+        else if (field === 'Feature') {
+            val = (record.get('Feature') && (record.get('Feature').FormattedID + ': ' + record.get('Feature').Name)) || '';
+        }
         else if (field === 'Parent') {
             val = (val && val.Parent && val.Parent._refObjectName) || (record.get('Feature') && record.get('Feature')._refObjectName) || 'No Parent';
         }
         else if (field === 'Release') {
             val = (val && val.Name) || 'Unscheduled';
-        }
-        else if (field === 'Parent') {
-            val = (val && val.Name) ? `${val.FormattedID} - ${val.Name}` : '';
         }
         else if (field === 'Project') {
             val = (val && val.Name) || 'Failed to convert project field';
@@ -2652,7 +2681,7 @@ Ext.define("user-story-ancestor-grid", {
         Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
             models: this.getModelNames(),
             enableHierarchy: true,
-            fetch: [this.getFeatureName(), 'ObjectID'],
+            fetch: [this.getFeatureName(), 'ObjectID', 'c_Tranche'],
             context: dataContext,
             enablePostGet: true,
             remoteSort: true,
@@ -2849,7 +2878,6 @@ Ext.define("user-story-ancestor-grid", {
                 store: store,
                 storeConfig: {
                     filters,
-                    // groupString: 'c_Tranche',
                     context: dataContext,
                     enablePostGet: true
                 },
@@ -2970,7 +2998,7 @@ Ext.define("user-story-ancestor-grid", {
             columns = Ext.Array.merge(additionalFields, derivedFields);
 
         var fetch = _.pluck(additionalFields, 'dataIndex');
-        fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName']);
+        fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName', 'c_Tranche']);
         if (includeTasks) {
             fetch.push('Tasks');
         }
@@ -3062,13 +3090,22 @@ Ext.define("user-story-ancestor-grid", {
     getExportCSV: function (records, columns) {
         var standardColumns = _.filter(columns, function (c) { return c.dataIndex || null; }),
             headers = _.map(standardColumns, function (c) { if (c.text === "ID") { return "Formatted ID"; } return c.text; }),
-            fetchList = _.map(standardColumns, function (c) { return c.dataIndex; }),
+            fetchList = _.map(standardColumns, function (c) { return c.dataIndex }),
             derivedColumns = this.getDerivedColumns();
+
+        if (!_.contains(headers, 'Tranche')) {
+            headers.push('Tranche');
+        }
+        if (!_.contains(fetchList, 'c_Tranche')) {
+            fetchList.push('c_Tranche');
+        }
 
         this.logger.log('getExportCSV', headers, fetchList);
 
         Ext.Array.each(derivedColumns, function (d) {
-            headers.push(d.text);
+            if (d.text !== 'Tranche') {
+                headers.push(d.text);
+            }
         });
 
         var csv = [headers.join(',')];
@@ -3084,11 +3121,13 @@ Ext.define("user-story-ancestor-grid", {
             }
 
             Ext.Array.each(derivedColumns, function (d) {
-                var ancestor = record.get(d.ancestorName);
-                if (ancestor) {
-                    row.push(Ext.String.format("{0}: {1}", ancestor.FormattedID, ancestor.Name));
-                } else {
-                    row.push("");
+                if (d.text !== 'Tranche') {
+                    var ancestor = record.get(d.ancestorName);
+                    if (ancestor) {
+                        row.push(Ext.String.format("{0}: {1}", ancestor.FormattedID, ancestor.Name));
+                    } else {
+                        row.push("");
+                    }
                 }
             });
 
@@ -3113,8 +3152,11 @@ Ext.define("user-story-ancestor-grid", {
         return cols;
     },
     getDerivedColumns: function () {
-        var cols = [];
-        //Ext.Array.each(this.portfolioItemTypeDefs, function(p){
+        var cols = [{
+            xtype: 'tranchetemplatecolumn',
+            text: 'Tranche'
+        }];
+
         for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
 
             var name = this.portfolioItemTypeDefs[i].TypePath.toLowerCase().replace('portfolioitem/', '');
