@@ -7,10 +7,10 @@
         "src/javascript/utils/__ts-info-link.js",
         "src/javascript/utils/__ts-logger.js",
         "src/javascript/utils/ancestor-template-column.js",
-        "src/javascript/utils/record-field-renderer-factory.js",
         "src/javascript/utils/file-utilities.js",
         "src/javascript/utils/overrides.js",
         "node_modules/@customagile/ancestor-pi-multi-level-pi-app-filter/index.js",
+        "node_modules/@customagile/utils-field-renderer/field-renderer.js",
         "src/javascript/app.js"
     ],
     "css": [

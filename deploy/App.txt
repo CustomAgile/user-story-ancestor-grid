@@ -2,14 +2,14 @@
 <html>
 
 <head>
-    <title>user-story-ancestor-grid-1.0.4</title>
+    <title>user-story-ancestor-grid-1.0.5</title>
     <!--  (c) 2020 Custom Agile.  All Rights Reserved. -->
-    <!--  Build Date: Sun Mar 15 2020 17:36:23 GMT+0100 (Central European Standard Time) -->
+    <!--  Build Date: Thu Apr 09 2020 08:20:54 GMT-0400 (Eastern Daylight Time) -->
     <!--  Repository: https://github.com/CustomAgile/user-story-ancestor-grid -->
 
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Sun Mar 15 2020 17:36:23 GMT+0100 (Central European Standard Time)";
-        var CHECKSUM = 1374710225411;
+        var APP_BUILD_DATE = "Thu Apr 09 2020 08:20:54 GMT-0400 (Eastern Daylight Time)";
+        var CHECKSUM = 1397534039540;
     </script>
 
     <script type="text/javascript" src="/apps/2.1/sdk.js"></script>
@@ -234,84 +234,6 @@ Ext.define('CArABU.technicalservices.AncestorTemplateColumn', {
         var data = Ext.apply({}, record.get(this.ancestorName)); //, record.getAssociatedData());
         return this.tpl.apply(data);
     }
-});
-/**
-     * Creates custom renderers based upon field types.
-     */
-Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
-    singleton: true,
-
-    getFieldDisplayValue: function (record, field, delimiter) {
-        let val = record.get(field);
-        let d = delimiter || ', ';
-
-        if (_.isUndefined(val) || val === null) {
-            val = "";
-        }
-        else if (typeof val === 'boolean') {
-            val = val.toString();
-        }
-        else if (Ext.isDate(val)) {
-            val = Rally.util.DateTime.formatWithDefaultDateTime(val);
-        }
-        else if (field === 'Parent') {
-            val = (val && val.Parent && val.Parent._refObjectName) || (record.get('Feature') && record.get('Feature')._refObjectName) || 'No Parent';
-        }
-        else if (field === 'Release') {
-            val = (val && val.Name) || 'Unscheduled';
-        }
-        else if (field === 'Parent') {
-            val = (val && val.Name) ? `${val.FormattedID} - ${val.Name}` : '';
-        }
-        else if (field === 'Project') {
-            val = (val && val.Name) || 'Failed to convert project field';
-        }
-        else if (field === 'Predecessors' || field === 'Successors') {
-            val = _.map(val, (r) => {
-                let release = r.get('Release');
-                return `${r.get('FormattedID')} - ${(release && release.Name) || 'Unscheduled'}`;
-            });
-
-            val = val.join(d);
-        }
-        else if (field === 'PredecessorsAndSuccessors') {
-            val = typeof val.Predecessors === 'number' ? `Predecessors: ${val.Predecessors}; Successors: ${val.Successors}` : '';
-        }
-        else if (field === 'Owner' || field === 'CreatedBy') {
-            val = val.DisplayName || `${val.FirstName} ${val.LastName}`;
-        }
-        else if (field === 'PreliminaryEstimate') {
-            val = `${val.Name} (${val.Value})`;
-        }
-        else if (field === 'Milestones') {
-            if (val.Count) {
-                val = _.map(val._tagsNameArray, (m) => {
-                    return `${m.FormattedID} - ${m.Name}`;
-                });
-                val = val.join(d);
-            }
-            else {
-                val = 'None';
-            }
-        }
-        else if (typeof val === 'object') {
-            if (val._tagsNameArray) {
-                val = _.map(val._tagsNameArray, (m) => {
-                    return m.Name || m.Value;
-                });
-                val = val.join(d);
-            }
-            else {
-                val = val.Name || val.value || val._refObjectName || 'Unable to convert field for export';
-            }
-        }
-        else if (_.isArray(val)) {
-            val = val.join(d);
-        }
-
-        return val;
-    }
-
 });
 Ext.define('CArABU.technicalservices.FileUtilities',{
     singleton: true,
@@ -564,7 +486,7 @@ multiFilterHelpHtml = `
         `;
 Ext.define('Utils.AncestorPiAppFilter', {
     alias: 'plugin.UtilsAncestorPiAppFilter',
-    version: "1.2.3",
+    version: "1.2.6",
     mixins: [
         'Ext.AbstractPlugin',
         'Rally.Messageable'
@@ -631,7 +553,7 @@ Ext.define('Utils.AncestorPiAppFilter', {
          * @cfg {Array}
          * Whitelist array for inline filters
          */
-        whiteListFields: ['Tags', 'Milstones', 'c_EAEpic'],
+        whiteListFields: ['Tags', 'Milstones', 'c_EAEpic', 'DisplayColor'],
 
         /**
          * @cfg {Array}
@@ -924,6 +846,7 @@ Ext.define('Utils.AncestorPiAppFilter', {
                 filters.push(childFilter);
             }
         }
+
         return filters;
     },
 
@@ -1117,11 +1040,33 @@ Ext.define('Utils.AncestorPiAppFilter', {
             }
         }
 
-        if (filter && parentPrefix) {
-            this._updateWsapiFilterWithPrefix(filter, parentPrefix);
+        if (filter) {
+            this._updateWsapiDisplayColorFilter(filter);
+            if (parentPrefix) {
+                this._updateWsapiFilterWithPrefix(filter, parentPrefix);
+            }
         }
 
         return filter ? [filter] : [];
+    },
+
+    // DisplayColor filter passes hex value as uppercase, but the web service needs
+    // hex values to be lowercase in order to work properly
+    _updateWsapiDisplayColorFilter: function (filter) {
+        if (filter) {
+            if (filter.property) {
+                if (typeof filter.property === 'object') {
+                    this._updateWsapiDisplayColorFilter(filter.property);
+                }
+            }
+
+            if (typeof filter.value === 'object') {
+                this._updateWsapiDisplayColorFilter(filter.value);
+            }
+            else if (typeof filter.value === 'string' && /^#[0-9a-f]{3,6}$/i.test(filter.value)) {
+                filter.value = filter.value.toLowerCase();
+            }
+        }
     },
 
     // Recursively traverse through a Rally WSAPI filter and apply the given prefix to all of the values
@@ -2480,6 +2425,111 @@ Ext.define('Utils.AncestorPiAppFilter', {
         });
     }
 });
+/**
+ *      Given a record and a field, return a user-friendly string representation
+ */
+Ext.define('CustomAgile.ui.renderer.RecordFieldRendererFactory', {
+    singleton: true,
+
+    getFieldDisplayValue: function (record, field, delimiter, cleanseForExport) {
+        if (!record || !field) {
+            return '';
+        }
+
+        let val = record.get ? record.get(field) : record[field];
+        let d = delimiter || ', ';
+
+        if (_.isUndefined(val) || val === null) {
+            val = '';
+        }
+        else if (typeof val === 'boolean') {
+            val = val.toString();
+        }
+        else if (Ext.isDate(val)) {
+            val = Rally.util.DateTime.formatWithDefaultDateTime(val);
+        }
+        else if (field === 'Parent') {
+            val = (val && (val.FormattedID && val.Name && val.FormattedID + ': ' + val.Name) || val._refObjectName) || (record.get('Feature') && ((record.get('Feature').FormattedID && record.get('Feature').Name && record.get('Feature').FormattedID + ': ' + record.get('Feature').Name) || record.get('Feature')._refObjectName)) || 'No Parent';
+        }
+        else if (field === 'Release') {
+            val = (val && val.Name) || 'Unscheduled';
+        }
+        else if (field === 'Parent') {
+            val = (val && val.Name) ? `${val.FormattedID} - ${val.Name}` : '';
+        }
+        else if (field === 'Project') {
+            val = (val && val.Name) || 'Failed to convert project field';
+        }
+        else if (field === 'Predecessors' || field === 'Successors') {
+            val = typeof val === 'object' && typeof val.Count === 'number' ? val.Count : '';
+        }
+        else if (field === 'PredecessorsAndSuccessors') {
+            val = typeof val.Predecessors === 'number' ? `Predecessors: ${val.Predecessors}; Successors: ${val.Successors}` : '';
+        }
+        else if (field === 'Owner' || field === 'CreatedBy') {
+            val = val.DisplayName || (val.FirstName && val.LastName && `${val.FirstName} ${val.LastName}`) || val._refObjectName;
+        }
+        else if (field === 'PreliminaryEstimate') {
+            val = `${val.Name} (${val.Value})`;
+        }
+        else if (field === 'Milestones') {
+            if (val.Count) {
+                val = _.map(val._tagsNameArray, (m) => {
+                    return `${m.FormattedID} - ${m.Name}`;
+                });
+                val = val.join(d);
+            }
+            else {
+                val = 'None';
+            }
+        }
+        else if (field.toLowerCase().indexOf('portfolioitem/') > -1 || field === 'Feature') {
+            val = val && `${val.FormattedID} - ${val.Name}` || 'None';
+        }
+        else if (typeof val === 'object') {
+            if (val._tagsNameArray) {
+                val = _.map(val._tagsNameArray, (m) => {
+                    return m.Name || m.Value;
+                });
+                val = val.join(d);
+            }
+            else {
+                val = val.Name || val.value || val._refObjectName || 'Unable to convert field for export';
+            }
+        }
+        else if (_.isArray(val)) {
+            val = val.join(d);
+        }
+
+        if (cleanseForExport) {
+            val = this.cleanseExportValue(val);
+        }
+
+        return val;
+    },
+
+    cleanseExportValue(val) {
+        let reHTML = new RegExp('<\/?[^>]+>', 'g');
+        let reNbsp = new RegExp('&nbsp;', 'ig');
+
+        if (val && typeof val === "string") {
+            val = val.replace(/,/g, '');
+            val = val.replace(/"/g, "'");
+
+            if (reHTML.test(val)) {
+                val = val.replace('<br>', '\r\n');
+                val = Ext.util.Format.htmlDecode(val);
+                val = Ext.util.Format.stripTags(val);
+            }
+            if (reNbsp.test(val)) {
+                val = val.replace(reNbsp, ' ');
+            }
+        }
+
+        return val;
+    }
+
+});
 Ext.define("user-story-ancestor-grid", {
     extend: 'Rally.app.App',
     componentCls: 'app',
@@ -2537,7 +2587,7 @@ Ext.define("user-story-ancestor-grid", {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
             settingsConfig: {},
-            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA', 'c_EAEpic'],
+            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA', 'c_EAEpic', 'DisplayColor'],
             filtersHidden: false,
             visibleTab: 'HierarchicalRequirement',
             listeners: {
@@ -3073,7 +3123,7 @@ Ext.define("user-story-ancestor-grid", {
                 record = records[i];
 
             for (var j = 0; j < fetchList.length; j++) {
-                var val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ');
+                var val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ', true);
 
                 row.push(val || "");
             }
