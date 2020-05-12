@@ -1,0 +1,24 @@
+.multiselect-timebox-picker .rui-picker-option-text {
+  display: flex;
+  flex-direction: row;
+  margin-left: 5px;
+}
+
+.timebox-dates {
+  display: flex;
+  flex-direction: row;
+  margin-left: auto;
+}
+
+.pill-select-container .tagPill {
+  font-size: 9px;
+  padding: 1px 20px 1px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.x-form-trigger-click {
+  cursor: pointer;
+}

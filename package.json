@@ -1,6 +1,6 @@
 {
-  "name": "user-story-ancestor-grid",
-  "version": "1.0.3",
+  "name": "tranche-grid-report",
+  "version": "1.0.4",
   "scripts": {
     "debug": "grunt debug",
     "debug:watch": "nodemon --exec grunt debug",
@@ -9,9 +9,12 @@
     "deploy-debugsdk:watch": "nodemon --exec grunt deploy-debugsdk"
   },
   "dependencies": {
-    "@customagile/ancestor-pi-multi-level-pi-app-filter": "git+https://github.com/CustomAgile/utils-ancestor-pi-app-filter.git"
+    "@customagile/ancestor-pi-multi-level-pi-app-filter": "git+https://github.com/CustomAgile/utils-ancestor-pi-app-filter.git",
+    "field-renderer": "git+https://github.com/CustomAgile/utils-field-renderer.git",
+    "papaparse": "^5.1.1"
   },
   "devDependencies": {
+    "@customagile/utils-field-renderer": "git+https://github.com/CustomAgile/utils-field-renderer.git",
     "grunt": "~0.4.5",
     "grunt-cli": "0.1.6",
     "grunt-contrib-jasmine": "1.1.0",

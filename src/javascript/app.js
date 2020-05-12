@@ -21,21 +21,53 @@ Ext.define("user-story-ancestor-grid", {
 
     items: [
         {
-            id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
-            xtype: 'container',
-            layout: {
-                type: 'hbox',
-                align: 'middle',
-                defaultMargins: '0 10 10 0',
-            }
-        }, {
-            id: Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID,
-            xtype: 'container',
-            layout: {
-                type: 'hbox',
-                align: 'middle',
-                defaultMargins: '0 10 10 0',
-            }
+            xtype: 'tabpanel',
+            itemId: 'filterAndProjectsPanel',
+            stateful: true,
+            stateId: 'tranche-report-filter-and-projects-panel',
+            header: false,
+            collapsible: true,
+            animCollapse: false,
+            cls: 'blue-tabs',
+            activeTab: 0,
+            plain: true,
+            tabBar: {
+                margin: '0 0 0 100'
+            },
+            autoRender: true,
+            minTabWidth: 140,
+            items: [
+                {
+                    title: 'Filters',
+                    html: '',
+                    itemId: 'filtersTab',
+                    padding: 5,
+                    items: [
+                        {
+                            id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
+                            xtype: 'container',
+                            layout: {
+                                type: 'hbox',
+                                align: 'middle',
+                                defaultMargins: '0 10 10 0',
+                            }
+                        }, {
+                            id: Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID,
+                            xtype: 'container',
+                            layout: {
+                                type: 'hbox',
+                                align: 'middle',
+                                defaultMargins: '0 10 10 0',
+                            }
+                        },
+                    ]
+                },
+                {
+                    title: 'Projects',
+                    itemId: 'projectsTab',
+                    padding: 10,
+                }
+            ]
         }, {
             id: 'grid-area',
             itemId: 'grid-area',
@@ -51,12 +83,33 @@ Ext.define("user-story-ancestor-grid", {
         Rally.data.wsapi.batch.Proxy.superclass.timeout = 180000;
         this.down('#' + Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID).on('resize', this.onResize, this);
 
+        this.collapseBtn = Ext.widget('rallybutton', {
+            text: this.down('#filterAndProjectsPanel').getCollapsed() ? 'Expand Filters and Projects' : 'Collapse',
+            floating: true,
+            shadow: false,
+            height: 21,
+            handler: (btn) => {
+                this.down('#filterAndProjectsPanel').toggleCollapse();
+                this.onResize();
+                if (btn.getText() === 'Collapse') {
+                    btn.setText('Expand Filters and Projects');
+                }
+                else {
+                    btn.setText('Collapse');
+                }
+            }
+        });
+
+        this.collapseBtn.showBy(this.down('#filterAndProjectsPanel'), 'tl-tl', [0, 3]);
+        this.addProjectPicker();
+
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
             settingsConfig: {},
-            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA'],
+            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA', 'c_EAEpic', 'DisplayColor'],
             filtersHidden: false,
+            displayMultiLevelFilter: true,
             visibleTab: 'HierarchicalRequirement',
             listeners: {
                 scope: this,
@@ -68,14 +121,17 @@ Ext.define("user-story-ancestor-grid", {
 
                             plugin.addListener({
                                 scope: this,
-                                select: this._buildGridboardStore,
-                                change: this._buildGridboardStore
+                                select: () => {
+                                    this.filtersChange(this.ancestorFilterPlugin.getMultiLevelFilters());
+                                },
+                                change: this.filtersChange
                             });
 
+                            this.updateFilterTabText(plugin.getMultiLevelFilters());
                             this.initializeApp();
                         },
                         failure(msg) {
-                            this.showErrorNotification(msg);
+                            this.showError(msg);
                         },
                     });
                 },
@@ -83,12 +139,11 @@ Ext.define("user-story-ancestor-grid", {
         });
         this.addPlugin(this.ancestorFilterPlugin);
     },
-    showErrorNotification: function (msg) {
-        Rally.ui.notify.Notifier.showError({
-            message: msg
-        });
+    filtersChange: function (filters) {
+        this.updateFilterTabText(filters);
+        this._buildGridboardStore();
     },
-    initializeApp: function (portfolioTypes) {
+    initializeApp: function () {
         this.portfolioItemTypeDefs = _.map(this.portfolioItemTypes, function (p) { return p.getData(); });
         this._buildGridboardStore();
     },
@@ -97,7 +152,6 @@ Ext.define("user-story-ancestor-grid", {
     },
     getFeatureTypePath: function () {
         return this.portfolioItemTypeDefs[0].TypePath;
-        //return 'PortfolioItem/Feature';
     },
     getPortfolioItemTypePaths: function () {
         return _.pluck(this.portfolioItemTypeDefs, 'TypePath');
@@ -127,12 +181,13 @@ Ext.define("user-story-ancestor-grid", {
         this.callParent(arguments);
         this._buildGridboardStore();
     },
-    getFilters: async function () {
+    getFilters: async function (status) {
+        this.setLoading('Loading Filters');
         let filters = this.getQueryFilter();
         let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getModelName(), true).catch((e) => {
-            this.showErrorNotification(e.message || e);
+            this.showError(e, 'Failed while loading filters');
             this.setLoading(false);
-            return;
+            status.cancelLoad = true;
         });
         let timeboxScope = this.getContext().getTimeboxScope();
         if (timeboxScope) {
@@ -141,6 +196,20 @@ Ext.define("user-story-ancestor-grid", {
 
         if (ancestorAndMultiFilters) {
             filters = filters.concat(ancestorAndMultiFilters);
+        }
+
+        if (this.useSpecificProjects() && !this.searchAllProjects()) {
+            if (!this.projectRefs) {
+                await this.loadProjects();
+                if (status.cancelLoad) {
+                    return [];
+                }
+            }
+            filters.push({
+                property: 'Project',
+                operator: 'in',
+                value: this.projectRefs
+            });
         }
 
         return filters;
@@ -155,13 +224,29 @@ Ext.define("user-story-ancestor-grid", {
     },
     _buildGridboardStore: async function () {
         this.logger.log('_buildGridboardStore');
+        this.updateProjectTabText();
+        this.setLoading(true);
+        let status = this.cancelPreviousLoad();
+        this.projectPicker = this.down('#projectPicker');
         this.down('#grid-area').removeAll();
-        let filters = await this.getFilters();
+        let filters = await this.getFilters(status);
+        if (status.cancelLoad) {
+            return;
+        }
         let dataContext = this.getContext().getDataContext();
         if (this.searchAllProjects()) {
             dataContext.project = null;
+            if (this.useSpecificProjects()) {
+                Rally.ui.notify.Notifier.showWarning({ message: 'Specific projects are selected from the project picker, but scoping is set to "Any Project". Defaulting to any project.' });
+            }
+        }
+        else if (this.useSpecificProjects()) {
+            dataContext.project = null;
+            dataContext.projectScopeUp = false;
+            dataContext.projectScopeDown = false;
         }
 
+        this.setLoading('Loading Artifacts');
         Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
             models: this.getModelNames(),
             enableHierarchy: true,
@@ -172,11 +257,23 @@ Ext.define("user-story-ancestor-grid", {
             filters
         }).then({
             success: function (store) {
-                this._addGridboard(store, filters, dataContext);
+                if (status.cancelLoad) {
+                    return;
+                }
+                this._addGridboard(store, filters, dataContext, status);
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         });
+    },
+    cancelPreviousLoad: function () {
+        if (this.globalStatus) {
+            this.globalStatus.cancelLoad = true;
+        }
+
+        let newStatus = { cancelLoad: false };
+        this.globalStatus = newStatus;
+        return newStatus;
     },
     getModelNames: function () {
         return ['HierarchicalRequirement'];
@@ -211,10 +308,10 @@ Ext.define("user-story-ancestor-grid", {
                 }
             }
         }
+        this.setLoading(false);
     },
 
     updateFeatureHashWithWsapiRecords: function (results) {
-
         var hash = {},
             features = [],
             featureTypePath = this.getPortfolioItemTypePaths()[0].toLowerCase(),
@@ -273,18 +370,16 @@ Ext.define("user-story-ancestor-grid", {
 
             var filterProperty = filterProperties.join('.');
 
-            var filters = _.map(featureOids, function (f) {
-                return {
-                    property: filterProperty,
-                    value: f
-                }
-            });
-            filters = Rally.data.wsapi.Filter.or(filters);
+            var filters = [{
+                property: filterProperty,
+                operator: 'in',
+                value: featureOids
+            }];
             this.logger.log('type', type, filters.toString());
 
             promises.push(this.fetchWsapiRecords({
                 model: type,
-                fetch: ['FormattedID', 'Name', 'Parent', 'ObjectID'],
+                fetch: ['FormattedID', 'Name', 'Parent', 'ObjectID', 'c_Tranche'],
                 enablePostGet: true,
                 limit: Infinity,
                 pageSize: 1000,
@@ -297,20 +392,23 @@ Ext.define("user-story-ancestor-grid", {
             success: function (results) {
                 deferred.resolve(results);
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
         return deferred;
-
-
     },
 
-    updateStories: function (store, node, records, operation) {
+    updateStories: function (store, node, records, operation, status) {
         this.logger.log('updateStories', records, operation);
 
         if (!records || records.length === 0 || records[0].get('_type') !== 'hierarchicalrequirement') {
+            this.setLoading(false);
             return;
         }
+        if (status.cancelLoad) {
+            return;
+        }
+
         var featureName = this.getFeatureName(),
             featureHash = this.getFeatureAncestorHash(),
             featureOids = [];
@@ -328,24 +426,30 @@ Ext.define("user-story-ancestor-grid", {
         if (featureOids.length > 0) {
             this.fetchAncestors(featureOids).then({
                 success: function (results) {
+                    if (status.cancelLoad) {
+                        return;
+                    }
                     this.updateFeatureHashWithWsapiRecords(results);
                     this.setAncestors(records);
                 },
-                failure: this.showErrorNotification,
+                failure: this.showError,
                 scope: this
             });
         } else {
             this.setAncestors(records)
         }
     },
-    _addGridboard: function (store, filters, dataContext) {
+    _addGridboard: function (store, filters, dataContext, status) {
         for (var i = 1; i < this.portfolioItemTypeDefs.length; i++) {
             var name = this.portfolioItemTypeDefs[i].Name.toLowerCase();
             store.model.addField({ name: name, type: 'auto', defaultValue: null });
         }
-        store.on('load', this.updateStories, this);
+        store.on('load', function (store, node, records, operation) {
+            this.updateStories(store, node, records, operation, status);
+        }, this);
         store.on('error', function (e) {
-            this.showErrorNotification('Error while loading user story store');
+            status.cancelLoad = true;
+            this.showError(e, 'Error while loading user story store');
         }, this);
 
         let gridArea = this.down('#grid-area');
@@ -373,10 +477,27 @@ Ext.define("user-story-ancestor-grid", {
     getGridPlugins: function () {
         return [{
             ptype: 'rallygridboardaddnew'
-        },
-        {
+        }, {
+            ptype: 'rallygridboardactionsmenu',
+            headerPosition: 'right',
+            menuItems: [
+                {
+                    text: 'Export...',
+                    handler: function () { this._export(false); },
+                    scope: this
+                }, {
+                    text: 'Export Stories and Tasks...',
+                    handler: this._deepExport,
+                    scope: this
+                }
+            ],
+            buttonConfig: {
+                margin: 3,
+                iconCls: 'icon-export'
+            }
+        }, {
             ptype: 'rallygridboardfieldpicker',
-            headerPosition: 'left',
+            headerPosition: 'right',
             modelNames: this.getModelNames(),
             alwaysSelectedValues: [this.getFeatureName()],
             stateful: true,
@@ -403,25 +524,174 @@ Ext.define("user-story-ancestor-grid", {
 
                 }
             }
-        }, {
-            ptype: 'rallygridboardactionsmenu',
-            menuItems: [
-                {
-                    text: 'Export...',
-                    handler: function () { this._export(false); },
-                    scope: this
-                }, {
-                    text: 'Export Stories and Tasks...',
-                    handler: this._deepExport,
-                    scope: this
-                }
-            ],
-            buttonConfig: {
-                margin: 3,
-                iconCls: 'icon-export'
-            }
         }];
     },
+
+    async _getSpecificProjectList() {
+        let projects = this.projectPicker.getValue();
+
+        if (this.down('#includeChildProjectsCheckbox').getValue()) {
+            projects = await this._getAllChildProjects(projects);
+        }
+
+        this.projects = _.map(projects, (p) => {
+            return p.get('ObjectID');
+        });
+
+        this.projectRefs = _.map(projects, (p) => {
+            return p.get('_ref');
+        });
+    },
+
+    async _getAllChildProjects(allRoots = [], fetch = ['Name', 'Children', 'ObjectID']) {
+        if (!allRoots.length) { return []; }
+
+        const promises = allRoots.map(r => this._wrap(r.getCollection('Children', { fetch, limit: Infinity }).load()));
+        const children = _.flatten(await Promise.all(promises));
+        const decendents = await this._getAllChildProjects(children, fetch);
+        const removeDupes = {};
+        let finalResponse = _.flatten([...decendents, ...allRoots, ...children]);
+
+        // eslint-disable-next-line no-return-assign
+        finalResponse.forEach(s => removeDupes[s.get('_ref')] = s);
+        finalResponse = Object.values(removeDupes);
+        return finalResponse;
+    },
+
+    async _getAllParentProjects(p) {
+        let projectStore = Ext.create('Rally.data.wsapi.Store', {
+            model: 'Project',
+            fetch: ['Name', 'ObjectID', 'Parent'],
+            filters: [{ property: 'ObjectID', value: p.get('Parent').ObjectID }],
+            limit: 1,
+            pageSize: 1,
+            autoLoad: false
+        });
+
+        let results = await projectStore.load();
+        if (results && results.length) {
+            if (results[0].get('Parent')) {
+                let parents = await this._getAllParentProjects(results[0]);
+                return [p].concat(parents);
+            }
+            return [p, results[0]];
+        }
+        return [p];
+    },
+
+    async _wrap(deferred) {
+        if (!deferred || !_.isFunction(deferred.then)) {
+            return Promise.reject(new Error('Wrap cannot process this type of data into a ECMA promise'));
+        }
+        return new Promise((resolve, reject) => {
+            deferred.then({
+                success(...args) {
+                    resolve(...args);
+                },
+                failure(error) {
+                    reject(error);
+                }
+            });
+        });
+    },
+
+    addProjectPicker: function () {
+        this.down('#projectsTab').add(
+            {
+                xtype: 'component',
+                html: `If you require a report spanning across multiple project hierarchies, use this project picker to specify where the data will be pulled from. If blank, app will respect user's current project scoping.`
+            },
+            {
+                xtype: 'customagilepillpicker',
+                itemId: 'projectPicker',
+                hidden: false,
+                statefulKey: this.getContext().getScopedStateId('tranche-report-project-picker'),
+                defaultToRecentTimeboxes: false,
+                listeners: {
+                    recordremoved: this.showApplyProjectsBtn,
+                    scope: this
+                },
+                pickerCfg: {
+                    xtype: 'customagilemultiselectproject',
+                    width: 350,
+                    margin: '10 0 0 0',
+                    listeners: {
+                        blur: this.showApplyProjectsBtn,
+                        scope: this
+                    }
+                }
+            },
+            {
+                xtype: 'rallycheckboxfield',
+                itemId: 'includeChildProjectsCheckbox',
+                fieldLabel: 'Show work from child projects',
+                stateful: true,
+                stateId: this.getContext().getScopedStateId('tranche-report-scope-down-checkbox'),
+                stateEvents: ['change'],
+                labelWidth: 200,
+                listeners: {
+                    scope: this,
+                    change: this.showApplyProjectsBtn
+                }
+            },
+            {
+                xtype: 'rallybutton',
+                itemId: 'applyProjectsBtn',
+                text: 'Apply',
+                margin: '10 0 0 0',
+                hidden: true,
+                handler: function (btn) {
+                    btn.hide();
+                    this.projectListChange();
+                }.bind(this)
+            }
+        );
+    },
+
+    showApplyProjectsBtn: function () {
+        this.down('#applyProjectsBtn') && this.down('#applyProjectsBtn').show();
+    },
+
+    updateFilterTabText: function (filters) {
+        var totalFilters = 0;
+        _.each(filters, function (filter) {
+            totalFilters += filter.length;
+        });
+
+        var titleText = totalFilters ? `FILTERS (${totalFilters})` : 'FILTERS';
+        var tab = this.down('#filterAndProjectsPanel').child('#filtersTab');
+
+        if (tab) { tab.setTitle(titleText); }
+    },
+
+    updateProjectTabText: function () {
+        let picker = this.down('#projectPicker');
+        totalProjects = picker.getValue().length;
+
+        var titleText = totalProjects ? `PROJECTS (${totalProjects})` : 'PROJECTS';
+        var tab = this.down('#filterAndProjectsPanel').child('#projectsTab');
+
+        if (tab) { tab.setTitle(titleText); }
+    },
+
+    async loadProjects() {
+        this.setLoading('Loading Project List...');
+
+        if (this.useSpecificProjects()) {
+            await this._getSpecificProjectList();
+        }
+    },
+
+    async projectListChange() {
+        await this.loadProjects();
+        this._buildGridboardStore();
+    },
+
+
+    useSpecificProjects() {
+        return !!this.projectPicker.getValue().length;
+    },
+
     getExportFilters: async function () {
         var filters = await this.getFilters();
         this.logger.log('getExportFilters', filters.toString());
@@ -481,6 +751,16 @@ Ext.define("user-story-ancestor-grid", {
             derivedFields = this.getDerivedColumns(),
             columns = Ext.Array.merge(additionalFields, derivedFields);
 
+        let dataContext = this.getContext().getDataContext();
+        if (this.searchAllProjects()) {
+            dataContext.project = null;
+        }
+        else if (this.useSpecificProjects()) {
+            dataContext.project = null;
+            dataContext.projectScopeUp = false;
+            dataContext.projectScopeDown = false;
+        }
+
         var fetch = _.pluck(additionalFields, 'dataIndex');
         fetch = fetch.concat(['ObjectID', 'DisplayName', 'FirstName', 'LastName', 'c_Tranche']);
         if (includeTasks) {
@@ -495,7 +775,8 @@ Ext.define("user-story-ancestor-grid", {
             model: 'HierarchicalRequirement',
             fetch: fetch,
             filters: filters,
-            limit: 'Infinity'
+            limit: 'Infinity',
+            context: dataContext
         }).then({
             success: this.updateExportStories,
             scope: this
@@ -509,25 +790,26 @@ Ext.define("user-story-ancestor-grid", {
                     CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
                 }
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
     },
     _exportTasks: function (userStories, fetch, columns) {
-
         var oids = [];
         for (var i = 0; i < userStories.length; i++) {
             if (userStories[i].get('Tasks') && userStories[i].get('Tasks').Count) {
                 oids.push(userStories[i].get('ObjectID'));
             }
         }
-        var filters = Ext.Array.map(oids, function (o) {
-            return {
+        var filters = [];
+
+        if (oids.length) {
+            filters.push({
                 property: 'WorkProduct.ObjectID',
-                value: o
-            };
-        });
-        filters = Rally.data.wsapi.Filter.or(filters);
+                operator: 'in',
+                value: oids
+            });
+        }
 
         fetch.push('WorkProduct');
         this.fetchWsapiRecords({
@@ -535,7 +817,8 @@ Ext.define("user-story-ancestor-grid", {
             fetch: fetch,
             filters: filters,
             limit: 'Infinity',
-            enablePostGet: true
+            enablePostGet: true,
+            context: { project: null }
         }).then({
             success: function (tasks) {
                 this.logger.log('exportTasks', tasks.length);
@@ -566,7 +849,7 @@ Ext.define("user-story-ancestor-grid", {
             },
             failure: function (msg) {
                 var msg = "Unable to export tasks due to error:  " + msg
-                this.showErrorNotification(msg);
+                this.showError(msg);
             },
             scope: this
         });
@@ -592,15 +875,20 @@ Ext.define("user-story-ancestor-grid", {
             }
         });
 
-        var csv = [headers.join(',')];
+        var csv = [headers];
 
         for (var i = 0; i < records.length; i++) {
-            var row = [],
+            let row = [],
                 record = records[i];
 
             for (var j = 0; j < fetchList.length; j++) {
-                var val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ');
-
+                var val = "";
+                if (fetchList[j] === 'c_Tranche') {
+                    val = (record.get('Feature') && record.get('Feature').c_Tranche) || '';
+                }
+                else {
+                    val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ');
+                }
                 row.push(val || "");
             }
 
@@ -615,10 +903,10 @@ Ext.define("user-story-ancestor-grid", {
                 }
             });
 
-            row = _.map(row, function (v) { return Ext.String.format("\"{0}\"", v.toString().replace(/"/g, "\"\"")); });
-            csv.push(row.join(","));
+            // row = _.map(row, function (v) { return Ext.String.format("\"{0}\"", v.toString().replace(/"/g, "\"\"")); });
+            csv.push(row);
         }
-        return csv.join("\r\n");
+        return csv = Papa.unparse(csv);
     },
 
     getColumnConfigs: function () {
@@ -735,5 +1023,38 @@ Ext.define("user-story-ancestor-grid", {
     onSettingsUpdate: function (settings) {
         this.logger.log('onSettingsUpdate', settings);
         this._buildGridboardStore();
-    }
+    },
+
+    setLoading(msg) {
+        this.down('#grid-area').setLoading(msg);
+    },
+
+    showError(msg, defaultMsg) {
+        Rally.ui.notify.Notifier.showError({ message: this.parseError(msg, defaultMsg) });
+        this.setLoading(false);
+    },
+
+    parseError(e, defaultMessage) {
+        defaultMessage = defaultMessage || 'An error occurred while loading the report';
+
+        if (typeof e === 'string' && e.length) {
+            return e;
+        }
+        if (e.message && e.message.length) {
+            return e.message;
+        }
+        if (e.exception && e.error && e.error.errors && e.error.errors.length) {
+            if (e.error.errors[0].length) {
+                return e.error.errors[0];
+            } else {
+                if (e.error && e.error.response && e.error.response.status) {
+                    return `${defaultMessage} (Status ${e.error.response.status})`;
+                }
+            }
+        }
+        if (e.exceptions && e.exceptions.length && e.exceptions[0].error) {
+            return e.exceptions[0].error.statusText;
+        }
+        return defaultMessage;
+    },
 });
