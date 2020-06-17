@@ -4,6 +4,7 @@
     "server": "https://rally1.rallydev.com",
     "repository": "https://github.com/CustomAgile/user-story-ancestor-grid",
     "javascript": [
+        "node_modules/papaparse/papaparse.min.js",
         "src/javascript/utils/__ts-info-link.js",
         "src/javascript/utils/__ts-logger.js",
         "src/javascript/utils/ancestor-template-column.js",

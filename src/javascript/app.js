@@ -2,7 +2,7 @@ Ext.define("user-story-ancestor-grid", {
     extend: 'Rally.app.App',
     componentCls: 'app',
     logger: new Rally.technicalservices.Logger(),
-    defaults: { margin: 10 },
+    defaults: { margin: 5 },
 
     integrationHeaders: {
         name: "user-story-ancestor-grid"
@@ -26,7 +26,7 @@ Ext.define("user-story-ancestor-grid", {
             layout: {
                 type: 'hbox',
                 align: 'middle',
-                defaultMargins: '0 10 10 0',
+                defaultMargins: '0 10 5 0',
             }
         }, {
             id: Utils.AncestorPiAppFilter.PANEL_RENDER_AREA_ID,
@@ -34,7 +34,7 @@ Ext.define("user-story-ancestor-grid", {
             layout: {
                 type: 'hbox',
                 align: 'middle',
-                defaultMargins: '0 10 10 0',
+                defaultMargins: '0 10 0 0',
             }
         }, {
             id: 'grid-area',
@@ -54,8 +54,6 @@ Ext.define("user-story-ancestor-grid", {
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
-            settingsConfig: {},
-            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA', 'c_EAEpic', 'DisplayColor'],
             filtersHidden: false,
             visibleTab: 'HierarchicalRequirement',
             listeners: {
@@ -75,7 +73,7 @@ Ext.define("user-story-ancestor-grid", {
                             this.initializeApp();
                         },
                         failure(msg) {
-                            this.showErrorNotification(msg);
+                            this.showError(msg);
                         },
                     });
                 },
@@ -83,11 +81,7 @@ Ext.define("user-story-ancestor-grid", {
         });
         this.addPlugin(this.ancestorFilterPlugin);
     },
-    showErrorNotification: function (msg) {
-        Rally.ui.notify.Notifier.showError({
-            message: msg
-        });
-    },
+
     initializeApp: function (portfolioTypes) {
         this.portfolioItemTypeDefs = _.map(this.portfolioItemTypes, function (p) { return p.getData(); });
         this._buildGridboardStore();
@@ -130,7 +124,7 @@ Ext.define("user-story-ancestor-grid", {
     getFilters: async function () {
         let filters = this.getQueryFilter();
         let ancestorAndMultiFilters = await this.ancestorFilterPlugin.getAllFiltersForType(this.getModelName(), true).catch((e) => {
-            this.showErrorNotification(e.message || e);
+            this.showError(e);
             this.setLoading(false);
             return;
         });
@@ -174,7 +168,7 @@ Ext.define("user-story-ancestor-grid", {
             success: function (store) {
                 this._addGridboard(store, filters, dataContext);
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         });
     },
@@ -297,7 +291,7 @@ Ext.define("user-story-ancestor-grid", {
             success: function (results) {
                 deferred.resolve(results);
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
         return deferred;
@@ -331,7 +325,7 @@ Ext.define("user-story-ancestor-grid", {
                     this.updateFeatureHashWithWsapiRecords(results);
                     this.setAncestors(records);
                 },
-                failure: this.showErrorNotification,
+                failure: this.showError,
                 scope: this
             });
         } else {
@@ -345,7 +339,7 @@ Ext.define("user-story-ancestor-grid", {
         }
         store.on('load', this.updateStories, this);
         store.on('error', function (e) {
-            this.showErrorNotification('Error while loading user story store');
+            this.showError(e, 'Error while loading user story store');
         }, this);
 
         let gridArea = this.down('#grid-area');
@@ -510,7 +504,7 @@ Ext.define("user-story-ancestor-grid", {
                     CArABU.technicalservices.FileUtilities.saveCSVToFile(csv, filename);
                 }
             },
-            failure: this.showErrorNotification,
+            failure: this.showError,
             scope: this
         }).always(function () { this.setLoading(false); }, this);
     },
@@ -567,7 +561,7 @@ Ext.define("user-story-ancestor-grid", {
             },
             failure: function (msg) {
                 var msg = "Unable to export tasks due to error:  " + msg
-                this.showErrorNotification(msg);
+                this.showError(msg);
             },
             scope: this
         });
@@ -584,7 +578,7 @@ Ext.define("user-story-ancestor-grid", {
             headers.push(d.text);
         });
 
-        var csv = [headers.join(',')];
+        var csv = [headers];
 
         for (var i = 0; i < records.length; i++) {
             var row = [],
@@ -605,10 +599,9 @@ Ext.define("user-story-ancestor-grid", {
                 }
             });
 
-            row = _.map(row, function (v) { return Ext.String.format("\"{0}\"", v.toString().replace(/"/g, "\"\"")); });
-            csv.push(row.join(","));
+            csv.push(row);
         }
-        return csv.join("\r\n");
+        return Papa.unparse(csv);
     },
 
     getColumnConfigs: function () {
@@ -716,6 +709,34 @@ Ext.define("user-story-ancestor-grid", {
 
     searchAllProjects() {
         return this.ancestorFilterPlugin.getIgnoreProjectScope();
+    },
+
+    showError(msg, defaultMessage) {
+        Rally.ui.notify.Notifier.showError({ message: this.parseError(msg, defaultMessage) });
+    },
+
+    parseError(e, defaultMessage) {
+        defaultMessage = defaultMessage || 'An unknown error has occurred';
+
+        if (typeof e === 'string' && e.length) {
+            return e;
+        }
+        if (e.message && e.message.length) {
+            return e.message;
+        }
+        if (e.exception && e.error && e.error.errors && e.error.errors.length) {
+            if (e.error.errors[0].length) {
+                return e.error.errors[0];
+            } else {
+                if (e.error && e.error.response && e.error.response.status) {
+                    return `${defaultMessage} (Status ${e.error.response.status})`;
+                }
+            }
+        }
+        if (e.exceptions && e.exceptions.length && e.exceptions[0].error) {
+            return e.exceptions[0].error.statusText;
+        }
+        return defaultMessage;
     },
 
     //onSettingsUpdate:  Override
