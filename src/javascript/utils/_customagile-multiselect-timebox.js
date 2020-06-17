@@ -21,6 +21,10 @@ Ext.define('CustomAgile.ui.picker.MultiSelectTimebox', {
         Rally.ui.list.PagingToolbar.prototype.emptyMsg = 'No timeboxes';
 
         this.callParent(arguments);
+
+        if (!this.store) {
+            this.createStore();
+        }
     },
 
     triggerBlur() {
@@ -152,9 +156,9 @@ Ext.define('CustomAgile.ui.picker.MultiSelectTimebox', {
         }
 
         this.on('expand', this.refreshView, this);
-        this.on('inputtextchanged', this._onInputTextChanged, this);
-        this.mon(this.inputEl, 'keydown', this._onInputKeyDown, this);
-        this.mon(this.inputEl, 'keyup', this.validate, this);
+        //  this.on('inputtextchanged', this._onInputTextChanged, this);
+        this.mon(this.inputEl, 'keydown', this._onInputKeyDown, this, { buffer: 700 });
+        this.mon(this.inputEl, 'keyup', this.validate, this, { buffer: 700 });
         this.mon(this.inputEl, 'keyup', this._onInputKeyUp, this, { buffer: 700 });
     },
 
@@ -175,7 +179,8 @@ Ext.define('CustomAgile.ui.picker.MultiSelectTimebox', {
 
         // allow shift but disregard other modifiers
         if (event.shiftKey || !Rally.util.Event.isModifierKey(event)) {
-            this.fireEvent('inputtextchanged', this.getInputTextValue());
+            // this.fireEvent('inputtextchanged', this.getInputTextValue());
+            this._onInputTextChanged();
         }
         if (this.getInputTextValue() === '') {
             if (this.store.filters) {

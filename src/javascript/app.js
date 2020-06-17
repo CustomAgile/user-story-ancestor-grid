@@ -93,22 +93,26 @@ Ext.define("user-story-ancestor-grid", {
                 this.onResize();
                 if (btn.getText() === 'Collapse') {
                     btn.setText('Expand Filters and Projects');
+                    this.ancestorFilterPlugin.hideHelpButton();
                 }
                 else {
                     btn.setText('Collapse');
+                    this.ancestorFilterPlugin.showHelpButton();
                 }
             }
         });
 
         this.collapseBtn.showBy(this.down('#filterAndProjectsPanel'), 'tl-tl', [0, 3]);
+
+        // If panel is collapsed, the multifilter help button isn't rendered in its proper place
+        this.shouldCollapseSettings = this.down('#filterAndProjectsPanel').getCollapsed();
+        this.down('#filterAndProjectsPanel').expand(false);
+
         this.addProjectPicker();
 
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
-            settingsConfig: {},
-            whiteListFields: ['Tags', 'Milestones', 'c_EnterpriseApprovalEA', 'c_EAEpic', 'DisplayColor'],
-            filtersHidden: false,
             displayMultiLevelFilter: true,
             visibleTab: 'HierarchicalRequirement',
             listeners: {
@@ -127,6 +131,21 @@ Ext.define("user-story-ancestor-grid", {
                                 change: this.filtersChange
                             });
 
+                            this.down('#filterAndProjectsPanel').on('beforetabchange', (tabs, newTab) => {
+                                if (newTab.title.indexOf('FILTERS') > -1) {
+                                    this.ancestorFilterPlugin.showHelpButton();
+                                }
+                                else {
+                                    this.ancestorFilterPlugin.hideHelpButton();
+                                }
+                            });
+
+                            // If panel is collapsed, the multifilter help button isn't rendered in its proper place
+                            if (this.shouldCollapseSettings) {
+                                this.down('#filterAndProjectsPanel').collapse();
+                                this.ancestorFilterPlugin.hideHelpButton();
+                            }
+
                             this.updateFilterTabText(plugin.getMultiLevelFilters());
                             this.initializeApp();
                         },
@@ -138,7 +157,20 @@ Ext.define("user-story-ancestor-grid", {
             }
         });
         this.addPlugin(this.ancestorFilterPlugin);
+
+        // Hide floating components because of course they are still visible when settings menu is shown
+        this.on('beforehide', () => {
+            this.collapseBtn.hide();
+        });
+        this.on('beforeshow', () => {
+            this.collapseBtn.show();
+
+            if (this.down('#filterAndProjectsPanel').getActiveTab().title.indexOf('FILTERS') === -1) {
+                setTimeout(() => this.ancestorFilterPlugin.hideHelpButton(), 1000);
+            }
+        });
     },
+
     filtersChange: function (filters) {
         this.updateFilterTabText(filters);
         this._buildGridboardStore();
@@ -887,7 +919,7 @@ Ext.define("user-story-ancestor-grid", {
                     val = (record.get('Feature') && record.get('Feature').c_Tranche) || '';
                 }
                 else {
-                    val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ');
+                    val = CustomAgile.ui.renderer.RecordFieldRendererFactory.getFieldDisplayValue(record, fetchList[j], '; ', true);
                 }
                 row.push(val || "");
             }
