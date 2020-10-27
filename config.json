@@ -5,7 +5,6 @@
     "repository": "https://github.com/CustomAgile/user-story-ancestor-grid",
     "javascript": [
         "src/javascript/utils/__ts-info-link.js",
-        "src/javascript/utils/__ts-logger.js",
         "src/javascript/utils/tranche-template-column.js",
         "src/javascript/utils/ancestor-template-column.js",
         "src/javascript/utils/file-utilities.js",
