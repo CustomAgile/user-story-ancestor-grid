@@ -61,11 +61,6 @@ Ext.define("user-story-ancestor-grid", {
                             }
                         },
                     ]
-                },
-                {
-                    title: 'Projects',
-                    itemId: 'projectsTab',
-                    padding: 10,
                 }
             ]
         }, {
@@ -108,7 +103,7 @@ Ext.define("user-story-ancestor-grid", {
         this.shouldCollapseSettings = this.down('#filterAndProjectsPanel').getCollapsed();
         this.down('#filterAndProjectsPanel').expand(false);
 
-        this.addProjectPicker();
+
 
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
@@ -120,7 +115,7 @@ Ext.define("user-story-ancestor-grid", {
                 ready(plugin) {
                     Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes().then({
                         scope: this,
-                        success(portfolioItemTypes) {
+                        async success(portfolioItemTypes) {
                             this.portfolioItemTypes = _.sortBy(portfolioItemTypes, type => type.get('Ordinal'));
 
                             plugin.addListener({
@@ -144,6 +139,12 @@ Ext.define("user-story-ancestor-grid", {
                             if (this.shouldCollapseSettings) {
                                 this.down('#filterAndProjectsPanel').collapse();
                                 this.ancestorFilterPlugin.hideHelpButton();
+                            }
+
+                            if (localStorage.getItem(this.getContext().getScopedStateId('tranche-report-project-picker'))) {
+                                this.ancestorFilterPlugin._setScopeControlToSpecific();
+                                let checkBoxValue = Ext.state.Manager.get(this.getContext().getScopedStateId('tranche-report-scope-down-checkbox'));
+                                await this.ancestorFilterPlugin._updatePickerFromOldPicker('tranche-report', checkBoxValue ? checkBoxValue['checked'] : false);
                             }
 
                             this.updateFilterTabText(plugin.getMultiLevelFilters());
@@ -230,7 +231,7 @@ Ext.define("user-story-ancestor-grid", {
             filters = filters.concat(ancestorAndMultiFilters);
         }
 
-        if (this.useSpecificProjects() && !this.searchAllProjects()) {
+        if (this.ancestorFilterPlugin.useSpecificProjects() && !this.searchAllProjects()) {
             if (!this.projectRefs) {
                 await this.loadProjects();
                 if (status.cancelLoad) {
@@ -261,18 +262,16 @@ Ext.define("user-story-ancestor-grid", {
         let status = this.cancelPreviousLoad();
         this.projectPicker = this.down('#projectPicker');
         this.down('#grid-area').removeAll();
+        this._addCancelBtn(false);
         let filters = await this.getFilters(status);
         if (status.cancelLoad) {
             return;
         }
         let dataContext = this.getContext().getDataContext();
-        if (this.searchAllProjects()) {
+        if (!this.ancestorFilterPlugin.useSpecificProjects() && this.searchAllProjects()) {
             dataContext.project = null;
-            if (this.useSpecificProjects()) {
-                Rally.ui.notify.Notifier.showWarning({ message: 'Specific projects are selected from the project picker, but scoping is set to "Any Project". Defaulting to any project.' });
-            }
         }
-        else if (this.useSpecificProjects()) {
+        else if (this.ancestorFilterPlugin.useSpecificProjects()) {
             dataContext.project = null;
             dataContext.projectScopeUp = false;
             dataContext.projectScopeDown = false;
@@ -298,6 +297,33 @@ Ext.define("user-story-ancestor-grid", {
             scope: this
         });
     },
+
+    _addCancelBtn(hidden) {
+        let width = this.down('#grid-area').getEl().getWidth();
+        let height = this.down('#grid-area').getEl().getHeight();
+        this.down('#grid-area').add({
+            xtype: 'rallybutton',
+            text: 'cancel',
+            itemId: 'cancelBtn',
+            id: 'cancelBtn',
+            style: `z-index:19500;position:absolute;top:${Math.round(height / 2) + 50}px;left:${Math.round(width / 2) - 30}px;width:60px;height:25px;`,
+            hidden,
+            handler: this._cancelLoading
+        });
+    },
+
+    _cancelLoading: function () {
+        let app = Rally.getApp();
+        if (app.globalStatus) {
+            app.globalStatus.cancelLoad = true;
+        }
+        let newStatus = { cancelLoad: false };
+        this.globalStatus = newStatus;
+
+        app.down('#grid-area').setLoading(false);
+        app.down('#cancelBtn').hide();
+    },
+
     cancelPreviousLoad: function () {
         if (this.globalStatus) {
             this.globalStatus.cancelLoad = true;
@@ -340,6 +366,7 @@ Ext.define("user-story-ancestor-grid", {
                 }
             }
         }
+        this.down('#grid-area').down('#cancelBtn').hide();
         this.setLoading(false);
     },
 
@@ -559,126 +586,6 @@ Ext.define("user-story-ancestor-grid", {
         }];
     },
 
-    async _getSpecificProjectList() {
-        let projects = this.projectPicker.getValue();
-
-        if (this.down('#includeChildProjectsCheckbox').getValue()) {
-            projects = await this._getAllChildProjects(projects);
-        }
-
-        this.projects = _.map(projects, (p) => {
-            return p.get('ObjectID');
-        });
-
-        this.projectRefs = _.map(projects, (p) => {
-            return p.get('_ref');
-        });
-    },
-
-    async _getAllChildProjects(allRoots = [], fetch = ['Name', 'Children', 'ObjectID']) {
-        if (!allRoots.length) { return []; }
-
-        const promises = allRoots.map(r => this._wrap(r.getCollection('Children', { fetch, limit: Infinity, filters: [{ property: 'State', value: 'Open' }] }).load()));
-        const children = _.flatten(await Promise.all(promises));
-        const decendents = await this._getAllChildProjects(children, fetch);
-        const removeDupes = {};
-        let finalResponse = _.flatten([...decendents, ...allRoots, ...children]);
-
-        // eslint-disable-next-line no-return-assign
-        finalResponse.forEach(s => removeDupes[s.get('_ref')] = s);
-        finalResponse = Object.values(removeDupes);
-        return finalResponse;
-    },
-
-    async _getAllParentProjects(p) {
-        let projectStore = Ext.create('Rally.data.wsapi.Store', {
-            model: 'Project',
-            fetch: ['Name', 'ObjectID', 'Parent'],
-            filters: [{ property: 'ObjectID', value: p.get('Parent').ObjectID }],
-            limit: 1,
-            pageSize: 1,
-            autoLoad: false
-        });
-
-        let results = await projectStore.load();
-        if (results && results.length) {
-            if (results[0].get('Parent')) {
-                let parents = await this._getAllParentProjects(results[0]);
-                return [p].concat(parents);
-            }
-            return [p, results[0]];
-        }
-        return [p];
-    },
-
-    async _wrap(deferred) {
-        if (!deferred || !_.isFunction(deferred.then)) {
-            return Promise.reject(new Error('Wrap cannot process this type of data into a ECMA promise'));
-        }
-        return new Promise((resolve, reject) => {
-            deferred.then({
-                success(...args) {
-                    resolve(...args);
-                },
-                failure(error) {
-                    reject(error);
-                }
-            });
-        });
-    },
-
-    addProjectPicker: function () {
-        this.down('#projectsTab').add(
-            {
-                xtype: 'component',
-                html: `If you require a report spanning across multiple project hierarchies, use this project picker to specify where the data will be pulled from. If blank, app will respect user's current project scoping.`
-            },
-            {
-                xtype: 'customagilepillpicker',
-                itemId: 'projectPicker',
-                hidden: false,
-                statefulKey: this.getContext().getScopedStateId('tranche-report-project-picker'),
-                defaultToRecentTimeboxes: false,
-                listeners: {
-                    recordremoved: this.showApplyProjectsBtn,
-                    scope: this
-                },
-                pickerCfg: {
-                    xtype: 'customagilemultiselectproject',
-                    width: 350,
-                    margin: '10 0 0 0',
-                    listeners: {
-                        blur: this.showApplyProjectsBtn,
-                        scope: this
-                    }
-                }
-            },
-            {
-                xtype: 'rallycheckboxfield',
-                itemId: 'includeChildProjectsCheckbox',
-                fieldLabel: 'Show work from child projects',
-                stateful: true,
-                stateId: this.getContext().getScopedStateId('tranche-report-scope-down-checkbox'),
-                stateEvents: ['change'],
-                labelWidth: 200,
-                listeners: {
-                    scope: this,
-                    change: this.showApplyProjectsBtn
-                }
-            },
-            {
-                xtype: 'rallybutton',
-                itemId: 'applyProjectsBtn',
-                text: 'Apply',
-                margin: '10 0 0 0',
-                hidden: true,
-                handler: function (btn) {
-                    btn.hide();
-                    this.projectListChange();
-                }.bind(this)
-            }
-        );
-    },
 
     showApplyProjectsBtn: function () {
         this.down('#applyProjectsBtn') && this.down('#applyProjectsBtn').show();
@@ -709,19 +616,15 @@ Ext.define("user-story-ancestor-grid", {
     async loadProjects() {
         this.setLoading('Loading Project List...');
 
-        if (this.useSpecificProjects()) {
-            await this._getSpecificProjectList();
+        if (this.ancestorFilterPlugin.useSpecificProjects()) {
+            this.projects = await this.ancestorFilterPlugin.getProjects();
+            this.projectRefs = await this.ancestorFilterPlugin.getProjectRefs();
         }
     },
 
     async projectListChange() {
         await this.loadProjects();
         this._buildGridboardStore();
-    },
-
-
-    useSpecificProjects() {
-        return !!this.projectPicker.getValue().length;
     },
 
     getExportFilters: async function () {
@@ -787,7 +690,7 @@ Ext.define("user-story-ancestor-grid", {
         if (this.searchAllProjects()) {
             dataContext.project = null;
         }
-        else if (this.useSpecificProjects()) {
+        else if (this.ancestorFilterPlugin.useSpecificProjects()) {
             dataContext.project = null;
             dataContext.projectScopeUp = false;
             dataContext.projectScopeDown = false;
